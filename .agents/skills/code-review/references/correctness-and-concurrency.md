@@ -1,0 +1,270 @@
+# EventHub Correctness 与 Concurrency Review
+
+仅当修改涉及：
+
+- Inventory
+- Reservation
+- Order
+- Payment
+- Cancel
+- Timeout
+- Refund
+- WaitingList
+- Transaction
+- Idempotency
+- Compensation
+- Concurrency
+
+时读取。
+
+---
+
+# 1. Inventory Invariant
+
+检查是否始终满足：
+
+totalStock
+=
+availableStock
++
+lockedStock
++
+soldStock
+
+以及：
+
+availableStock >= 0
+
+lockedStock >= 0
+
+soldStock >= 0。
+
+任何状态变化都必须保持库存守恒。
+
+---
+
+# 2. NORMAL Inventory
+
+检查是否保持：
+
+Conditional UPDATE
+
+例如要求：
+
+available_stock > 0
+
+再进行库存变化。
+
+警惕：
+
+SELECT stock
+→ Java Check
+→ UPDATE
+
+这种并发窗口。
+
+未经架构变化：
+
+不要自动加入：
+
+- synchronized
+- Redis Lock
+- SELECT FOR UPDATE
+
+代替原设计。
+
+---
+
+# 3. FLASH
+
+检查是否出现：
+
+GET
+→ Java判断
+→ DECR
+
+等非原子流程。
+
+决定抢票处理资格的关键 Redis 操作：
+
+应由合理 Lua 原子完成。
+
+检查重复请求：
+
+是否会重复扣库存。
+
+---
+
+# 4. Order State Machine
+
+合法转换：
+
+WAIT_PAY → PAID
+
+WAIT_PAY → CANCELLED
+
+WAIT_PAY → TIMEOUT
+
+PAID → REFUNDED
+
+检查是否出现：
+
+无条件 setStatus
+
+或：
+
+非法状态跳转。
+
+---
+
+# 5. State Race
+
+重点检查：
+
+Pay vs Cancel
+
+Pay vs Timeout
+
+Cancel vs Timeout
+
+是否使用：
+
+Expected State
++
+Conditional Update
++
+affectedRows
+
+保证只有一个竞争操作真正成功。
+
+---
+
+# 6. Idempotency
+
+对以下能力检查重复调用：
+
+- Pay
+- Cancel
+- Timeout
+- Refund
+- Reservation
+- MQ Consumer
+- Compensation
+
+重复调用：
+
+不得产生第二次有效业务副作用。
+
+---
+
+# 7. Purchase Eligibility
+
+检查：
+
+Refund
+
+是否只恢复库存。
+
+历史：
+
+purchased
+
+资格不能因为 Refund 被删除。
+
+用户成功购买并获得 Ticket 后：
+
+即使 REFUNDED
+
+也不能再次参加同 Session 抢票。
+
+---
+
+# 8. Transaction
+
+对于同 MySQL、同步跨模块操作：
+
+如果业务要求共同成功 / 失败，
+
+检查 ApplicationService 是否建立了正确 Local Transaction。
+
+例如 NORMAL：
+
+Inventory Lock
++
+WAIT_PAY Order
+
+不能留下 Partial Success。
+
+---
+
+# 9. Cross-component Transaction Illusion
+
+警惕：
+
+`@Transactional`
+
+外围包含：
+
+Redis
++
+RabbitMQ
++
+MySQL
+
+然后代码假设三者共同回滚。
+
+MySQL Local Transaction：
+
+不能自动覆盖 Redis / RabbitMQ。
+
+---
+
+# 10. Compensation
+
+检查补偿是否：
+
+Idempotent。
+
+同一 Reservation 可能被：
+
+- Retry
+- Timeout
+- MQ Duplicate
+- Reconciliation
+
+重复触发恢复。
+
+不能：
+
+重复增加库存。
+
+---
+
+# 11. WaitingList
+
+检查：
+
+- userId + sessionId 唯一
+- FIFO / Score 语义
+- Qualification 10 分钟
+- Qualification Expired 后推进下一人
+
+获得资格：
+
+不得自动创建 WAIT_PAY Order。
+
+---
+
+# 12. Failure Path
+
+检查：
+
+Happy Path 之外是否可能产生：
+
+- Stock Changed but Order Missing
+- Order Changed but Inventory Wrong
+- Reservation Stuck PROCESSING
+- Duplicate Ticket
+- Duplicate Stock Restore
+
+核心流程必须能够处理部分失败和重复恢复。

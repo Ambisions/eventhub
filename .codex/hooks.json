@@ -1,0 +1,19 @@
+{
+  "description": "EventHub V1 minimal deterministic Codex hooks.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git diff --check 1>&2",
+            "commandWindows": "git diff --check 1>&2",
+            "timeout": 10,
+            "statusMessage": "Checking Git diff whitespace"
+          }
+        ]
+      }
+    ]
+  }
+}
