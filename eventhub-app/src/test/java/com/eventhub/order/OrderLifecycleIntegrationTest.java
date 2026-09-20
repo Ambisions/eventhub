@@ -91,6 +91,26 @@ class OrderLifecycleIntegrationTest {
     }
 
     @Test
+    void paysAfterSaleEndWhenOrderHasNotExpired() {
+        long userId = createUser("pay-after-sale-end-user");
+        Fixture fixture = createFixture("pay-after-sale-end", new InventoryState(2, 1, 1, 0));
+        jdbcTemplate.update("UPDATE event_sessions SET sale_start_at = ?, sale_end_at = ? WHERE id = ?",
+                PAYMENT_NOW.minusHours(2), PAYMENT_NOW.minusMinutes(1), fixture.sessionId());
+        long orderId = insertOrder(userId, fixture.sessionId(), "WAIT_PAY", PAYMENT_NOW.plusMinutes(5));
+
+        LocalDateTime saleEndAt = jdbcTemplate.queryForObject(
+                "SELECT sale_end_at FROM event_sessions WHERE id = ?", LocalDateTime.class, fixture.sessionId());
+        assertThat(saleEndAt).isBefore(PAYMENT_NOW);
+
+        var paid = orderCommandApi.pay(userId, orderId);
+
+        assertThat(paid.status()).isEqualTo(OrderStatus.PAID);
+        assertThat(orderStatus(orderId)).isEqualTo("PAID");
+        assertThat(inventory(fixture.sessionId())).isEqualTo(new InventoryState(2, 1, 0, 1));
+        assertInventoryInvariant(fixture.sessionId());
+    }
+
+    @Test
     void cancelsExpiredWaitPayAndRejectsRepeatedCancelWithoutDoubleRelease() {
         long userId = createUser("cancel-user");
         Fixture fixture = createFixture("cancel", new InventoryState(3, 2, 1, 0));

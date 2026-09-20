@@ -465,7 +465,7 @@ Status: `COMPLETE / VERIFIED / FROZEN`
 
 ## Phase 6
 
-Status: `IN PROGRESS`
+Status: `COMPLETE / VERIFIED / FROZEN`
 
 ### Batch 1 — Event Guard + Inventory Foundation
 
@@ -542,6 +542,30 @@ Status: `COMPLETE / VERIFIED / FROZEN`
   Test Reviewer marked all 14 required properties `PROVEN` with no blocking verification gap.
 - V1/V2 migrations remain unchanged, no V3 was added, and Ticket, Refund, payment-provider,
   FLASH, Redis business, RabbitMQ business, and asynchronous timeout capabilities remain deferred.
+
+### Batch 5 — Integrated Verification / Final Freeze
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+- Closed the two remaining test-only evidence gaps with real MySQL cases for Inventory
+  configuration on a `REJECTED` Event and Pay after `sale_end_at` but before Order expiry;
+  no Production Code was changed.
+- A fresh isolated Compose project started from zero domain tables, and Flyway applied V1 then
+  V2 successfully. The history remained two successful migrations on subsequent application runs.
+- Runtime metadata and behavior checks verified the six-table schema, enforced Inventory and
+  Order constraints, generated `purchase_guard`, frozen indexes, active-order rejection, and
+  terminal-order guard release with zero probe residue.
+- The fresh Phase 6 targeted suite passed 64 tests, including real MySQL no-oversell,
+  same-user active-purchase, Submit/configuration, Pay/Cancel, and all Timeout races plus the
+  four cross-table rollback paths.
+- The final Root + 9 Module `clean verify` completed with `BUILD SUCCESS`: 146 tests passed
+  with zero failures, errors, or skipped tests, and Spring Boot repackage succeeded.
+- Final database, Redis, RabbitMQ topology, and AMQP connection residue checks were all zero;
+  Inventory nonnegative and conservation audits passed.
+- The formal Reviewer reported Blocker `0`, Major `0`, Minor `0`, and Needs Verification `0`.
+  The Phase-level Test Reviewer marked all 26 audited properties `PROVEN` and reported
+  `NO BLOCKING VERIFICATION GAP`.
+- V1/V2 migrations, Future Contract, and Governance remain unchanged; Phase 6 is now frozen.
 
 ### Global Governance Reconciliation
 

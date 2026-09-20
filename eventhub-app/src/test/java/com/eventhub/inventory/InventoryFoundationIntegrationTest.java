@@ -7,9 +7,11 @@ import com.eventhub.auth.api.AuthApi;
 import com.eventhub.auth.api.command.LoginCommand;
 import com.eventhub.auth.api.command.RegisterCommand;
 import com.eventhub.auth.api.model.AccessToken;
+import com.eventhub.event.api.AdminEventReviewApi;
 import com.eventhub.event.api.OrganizerEventApi;
 import com.eventhub.event.api.command.CreateEventCommand;
 import com.eventhub.event.api.command.CreateEventSessionCommand;
+import com.eventhub.event.api.command.RejectEventCommand;
 import com.eventhub.event.api.model.ManagedEventView;
 import com.eventhub.inventory.api.InventoryManagementApi;
 import com.eventhub.inventory.api.InventoryReservationApi;
@@ -58,6 +60,9 @@ class InventoryFoundationIntegrationTest {
     private OrganizerEventApi organizerEventApi;
 
     @Autowired
+    private AdminEventReviewApi adminEventReviewApi;
+
+    @Autowired
     private AuthApi authApi;
 
     @Autowired
@@ -83,6 +88,22 @@ class InventoryFoundationIntegrationTest {
         InventoryView resized = inventoryManagementApi.configureInventory(
                 fixture.owner().profile().getId(), new ConfigureInventoryCommand(fixture.sessionId(), 8));
         assertInventory(resized, 8, 8, 0, 0);
+    }
+
+    @Test
+    void configuresInventoryForRejectedEventThroughRealParentEventGuard() {
+        Fixture fixture = createFixture("rejected-configure");
+        organizerEventApi.submitEvent(fixture.owner().profile().getId(), fixture.eventId());
+        adminEventReviewApi.rejectEvent(fixture.eventId(), new RejectEventCommand("Synthetic review reason"));
+
+        InventoryView configured = inventoryManagementApi.configureInventory(
+                fixture.owner().profile().getId(), new ConfigureInventoryCommand(fixture.sessionId(), 7));
+
+        assertInventory(configured, 7, 7, 0, 0);
+        assertInventory(current(fixture.sessionId()), 7, 7, 0, 0);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM events WHERE id = ?", String.class, fixture.eventId()))
+                .isEqualTo("REJECTED");
     }
 
     @Test
