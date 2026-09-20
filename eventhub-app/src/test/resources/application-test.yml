@@ -1,0 +1,8 @@
+# TEST ONLY - this deterministic key is not a production secret.
+eventhub:
+  order:
+    timeout:
+      enabled: false
+  security:
+    jwt:
+      secret-base64: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=

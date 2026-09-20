@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.eventhub.event.mapper.EventSessionMapper">
+
+    <resultMap id="eventSessionEntityResultMap" type="com.eventhub.event.repository.EventSessionEntity">
+        <id column="id" property="id"/>
+        <result column="event_id" property="eventId"/>
+        <result column="name" property="name"/>
+        <result column="venue" property="venue"/>
+        <result column="sale_start_at" property="saleStartAt"/>
+        <result column="sale_end_at" property="saleEndAt"/>
+        <result column="start_at" property="startAt"/>
+        <result column="end_at" property="endAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="sessionColumns">
+        s.id, s.event_id, s.name, s.venue, s.sale_start_at, s.sale_end_at,
+        s.start_at, s.end_at, s.created_at, s.updated_at
+    </sql>
+
+    <select id="selectPublishedByEventId" resultMap="eventSessionEntityResultMap">
+        SELECT <include refid="sessionColumns"/>
+        FROM event_sessions s
+        INNER JOIN events e ON e.id = s.event_id
+        WHERE s.event_id = #{eventId}
+          AND e.status = 'PUBLISHED'
+        ORDER BY s.start_at ASC, s.id ASC
+    </select>
+
+    <select id="selectPublishedById" resultMap="eventSessionEntityResultMap">
+        SELECT <include refid="sessionColumns"/>
+        FROM event_sessions s
+        INNER JOIN events e ON e.id = s.event_id
+        WHERE s.id = #{sessionId}
+          AND e.status = 'PUBLISHED'
+    </select>
+
+    <update id="updateSession">
+        UPDATE event_sessions
+        SET name = #{name},
+            venue = #{venue},
+            sale_start_at = #{saleStartAt},
+            sale_end_at = #{saleEndAt},
+            start_at = #{startAt},
+            end_at = #{endAt},
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE id = #{sessionId}
+          AND event_id = #{eventId}
+    </update>
+</mapper>

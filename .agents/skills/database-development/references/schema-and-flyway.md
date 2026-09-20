@@ -82,21 +82,22 @@ Database Constraint
 
 `UNIQUE(order_no)`
 
-`UNIQUE(reservation_id)`
+`UNIQUE(user_id, session_id, purchase_guard)`
 
-其中 reservationId 是 FLASH Order 幂等的重要数据库安全线。
+Reservation concept 为未来冻结方向，但精确持久化模型、`reservation_id` 与
+唯一安全线尚未冻结。
 
 ## ticket
 
-`UNIQUE(ticket_code)`
+`UNIQUE(ticket_no)`
 
 `UNIQUE(order_id)`
 
 `UNIQUE(user_id, session_id)`
 
-## waiting_list
+## WaitingList persistence
 
-`UNIQUE(user_id, session_id)`
+WaitingList 为未来 Planned capability；Schema 与唯一约束尚未冻结。
 
 修改这些约束必须先说明：
 

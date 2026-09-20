@@ -1,0 +1,22 @@
+# Maven build output
+target/
+
+# Local IDE metadata
+.idea/
+*.iml
+.vscode/
+
+# Local logs
+*.log
+logs/
+
+# Local runtime and temporary files
+*.pid
+*.hprof
+*.tmp
+*.bak
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example

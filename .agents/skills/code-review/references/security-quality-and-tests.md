@@ -92,7 +92,7 @@ Global Handler：
 - requestId / traceId
 - userId（必要时）
 - sessionId
-- reservationId
+- frozen business key（未来 FLASH exact key 尚未冻结）
 - orderNo
 - messageId
 

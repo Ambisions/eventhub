@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.eventhub.event.mapper.EventMapper">
+
+    <resultMap id="eventEntityResultMap" type="com.eventhub.event.repository.EventEntity">
+        <id column="id" property="id"/>
+        <result column="organizer_user_id" property="organizerUserId"/>
+        <result column="title" property="title"/>
+        <result column="description" property="description"/>
+        <result column="status" property="status"/>
+        <result column="rejection_reason" property="rejectionReason"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="eventColumns">
+        id, organizer_user_id, title, description, status, rejection_reason, created_at, updated_at
+    </sql>
+
+    <select id="selectByIdForUpdate" resultMap="eventEntityResultMap">
+        SELECT <include refid="eventColumns"/>
+        FROM events
+        WHERE id = #{eventId}
+        FOR UPDATE
+    </select>
+
+    <select id="selectPublishedById" resultMap="eventEntityResultMap">
+        SELECT <include refid="eventColumns"/>
+        FROM events
+        WHERE id = #{eventId}
+          AND status = 'PUBLISHED'
+    </select>
+
+    <select id="selectOwnedById" resultMap="eventEntityResultMap">
+        SELECT <include refid="eventColumns"/>
+        FROM events
+        WHERE id = #{eventId}
+          AND organizer_user_id = #{currentUserId}
+    </select>
+
+    <select id="selectReviewById" resultMap="eventEntityResultMap">
+        SELECT <include refid="eventColumns"/>
+        FROM events
+        WHERE id = #{eventId}
+    </select>
+
+    <select id="selectPublishedPage" resultMap="eventEntityResultMap">
+        SELECT <include refid="eventColumns"/>
+        FROM events
+        WHERE status = 'PUBLISHED'
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{limit}
+        OFFSET #{offset}
+    </select>
+
+    <update id="updateEditableEvent">
+        UPDATE events
+        SET title = #{title},
+            description = #{description},
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE id = #{eventId}
+          AND organizer_user_id = #{currentUserId}
+          AND status IN ('DRAFT', 'REJECTED')
+    </update>
+
+    <update id="submitEvent">
+        UPDATE events
+        SET status = 'PENDING_REVIEW',
+            rejection_reason = NULL,
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE id = #{eventId}
+          AND organizer_user_id = #{currentUserId}
+          AND status IN ('DRAFT', 'REJECTED')
+    </update>
+
+    <update id="approveEvent">
+        UPDATE events
+        SET status = 'PUBLISHED',
+            rejection_reason = NULL,
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE id = #{eventId}
+          AND status = 'PENDING_REVIEW'
+    </update>
+
+    <update id="rejectEvent">
+        UPDATE events
+        SET status = 'REJECTED',
+            rejection_reason = #{reason},
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE id = #{eventId}
+          AND status = 'PENDING_REVIEW'
+    </update>
+</mapper>

@@ -12,6 +12,11 @@ description: >
 
 本 Skill 定义 EventHub Redis 相关任务的标准执行流程。
 
+FLASH 的 Redis + Lua atomic reservation 方向为
+`FUTURE / FROZEN / NOT_IMPLEMENTED`；Reservation 精确持久化模型、字段与
+`reservation_id` 尚未冻结。WaitingList capability 为 `FUTURE / PLANNED`，
+具体 Schema、ZSet、资格时长和约束尚未冻结。
+
 主要处理：
 
 - Redis Cache
@@ -19,8 +24,8 @@ description: >
 - FLASH Stock
 - Lua
 - occupied / purchased
-- Reservation Redis State
-- WaitingList
+- Reservation Redis State（future design only）
+- WaitingList（future planned）
 - Rate Limit
 - Failure / Compensation
 - Redis Performance
@@ -79,9 +84,9 @@ MySQL 最终事实
 
 例如：
 
-- Reservation Status
-- reservation-map
-- WaitingList Qualification
+- Reservation Status（exact model not yet frozen）
+- reservation-map（example only）
+- WaitingList Qualification（planned; exact contract not yet frozen）
 
 三种数据不能机械共享相同的：
 
@@ -160,8 +165,8 @@ Redis 与 MySQL 可以存在短暂差异，
 - occupied-users
 - purchased-users
 - reservation-map
-- PROCESSING / SUCCESS / FAILED
-- WaitingList ZSet
+- PROCESSING / SUCCESS / FAILED（example; persistence model not yet frozen）
+- WaitingList implementation（not yet frozen）
 - Qualification
 
 读取：
@@ -215,6 +220,8 @@ EventHub V1 不以 Redis Cluster 为架构前提，
 ---
 
 # 5. FLASH 的原子边界由 Lua 保证
+
+本节为 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的核心方向。
 
 FLASH 不允许：
 
@@ -284,7 +291,7 @@ Lua 只负责：
 =
 一次异步抢票请求及其处理状态
 
-退款可以恢复库存，
+未来退款（`FUTURE / FROZEN / NOT_IMPLEMENTED`）可以恢复库存，
 但不能因为退款删除历史 purchased 资格。
 
 重复 Reservation 请求不得重复扣减库存。
@@ -318,6 +325,8 @@ Redisson Distributed Lock
 ---
 
 # 9. 故障策略必须区分 NORMAL 与 FLASH
+
+FLASH Fail Fast 是 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的故障 Contract。
 
 NORMAL：
 
@@ -419,9 +428,8 @@ Redis Down
 
 Redis 重要事实变化时检查：
 
-`docs/middleware/redis.md`
-
-以及相关架构文档。
+`docs/specification/eventhub-v1.md`、`docs/database/schema.md` 与
+`docs/development/progress.md`。只有相关 middleware 文档真实存在时再读取。
 
 需要更新的典型内容包括：
 

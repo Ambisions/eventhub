@@ -14,17 +14,19 @@
 
 # 1. 模块职责
 
-`eventhub-order` 负责：
+`eventhub-order` 当前负责：
 
 - TicketOrder
-- ReservationRequest
-- 订单创建
-- 支付、取消、超时、退款状态转换
+- NORMAL Reserve 与 `WAIT_PAY` 订单创建
+- 支付、取消、超时状态转换
 - 订单状态机
-- FLASH 异步订单创建
-- Order 相关消息
-- Transactional Outbox
-- Consumer 幂等
+- NORMAL Reserve / Pay / Cancel / Timeout 的本地事务编排
+
+未来 `PAID → REFUNDED`、退款幂等与 `sold → available` 为
+`FUTURE / FROZEN / NOT_IMPLEMENTED`；FLASH 的 Lua → Reservation → Outbox →
+RabbitMQ → Consumer → MySQL 主链路及 At-Least-Once + Idempotent Consumer 也为
+`FUTURE / FROZEN / NOT_IMPLEMENTED`。Refund 事务所有者、Reservation 精确
+持久化模型 / `reservation_id`、消息拓扑与精确幂等 Key 尚未冻结。
 
 本模块不负责：
 
@@ -33,37 +35,47 @@
 - WaitingList
 - Ticket 最终业务能力
 - HTTP Controller
-- 跨领域流程编排
+- 未经 Frozen Contract 授权的其他跨领域流程编排
 
-跨领域流程由 `eventhub-app` 中的 ApplicationService 编排。
+跨领域流程默认由 `eventhub-app` 的 ApplicationService 编排。当前 Phase 6
+NORMAL Order Lifecycle 是已冻结窄例外，由本模块拥有 Reserve、Pay、Cancel、
+Timeout 的事务编排。
 
 ---
 
 # 2. 订单状态机
 
-合法状态转换只有：
+当前已实现的合法状态转换只有：
 
 `WAIT_PAY → PAID`
 
 `WAIT_PAY → CANCELLED`
 
-`WAIT_PAY → TIMEOUT`
+`WAIT_PAY → CLOSED`
 
-`PAID → REFUNDED`
+未来已冻结但尚未实现的转换：
 
-终态：
+`PAID → REFUNDED`（`FUTURE / FROZEN / NOT_IMPLEMENTED`）
+
+Phase 3 第一版 Schema Baseline 只包含
+`WAIT_PAY`、`PAID`、`CLOSED`、`CANCELLED`；实现退款前必须通过新
+Migration 扩展状态 `CHECK`，并重新评估 `purchase_guard` 和 Ticket
+唯一约束，不能把后续语义倒灌进第一版 Migration。
+
+当前持久终态：
 
 - `CANCELLED`
-- `TIMEOUT`
-- `REFUNDED`
+- `CLOSED`
+
+未来 `REFUNDED` 为退款终态，但不是当前持久状态。
 
 禁止未定义状态转换，例如：
 
 - `CANCELLED → PAID`
-- `TIMEOUT → PAID`
+- `CLOSED → PAID`
 - `REFUNDED → PAID`
 - `CANCELLED → WAIT_PAY`
-- `TIMEOUT → WAIT_PAY`
+- `CLOSED → WAIT_PAY`
 
 不要通过无条件 `setStatus` 绕过状态机。
 
@@ -148,9 +160,9 @@ SELECT
 
 `WAIT_PAY → CANCELLED`
 
-超时只允许：
+超时关闭只允许：
 
-`WAIT_PAY → TIMEOUT`
+`WAIT_PAY → CLOSED`
 
 重复取消、重复超时扫描、重复超时消息不得重复产生业务副作用。
 
@@ -168,13 +180,16 @@ V1 可以使用：
 
 但：
 
-`WAIT_PAY → TIMEOUT`
+`WAIT_PAY → CLOSED`
 
 的业务语义和幂等要求不得变化。
 
 ---
 
 # 6. 退款规则
+
+本节为 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的业务 Contract，不描述当前
+Production behavior。
 
 退款只允许：
 
@@ -211,6 +226,9 @@ V1 可以使用：
 
 两者不是同一个业务概念。
 
+Refund API、事务所有者、Ticket 精确退款状态 / 失效方式与 MQ 集成仍为
+`FUTURE / NOT_YET_FROZEN / NOT_IMPLEMENTED`。
+
 ---
 
 # 7. Order 与 Inventory 边界
@@ -223,43 +241,13 @@ Inventory 负责：
 
 库存状态。
 
-支付：
+当前 Reserve、Pay、Cancel 与 Timeout 由本模块 Service 建立 Local Transaction，
+先完成 Order INSERT / Conditional UPDATE，再通过 Inventory Public API 执行
+`available → locked`、`locked → sold` 或 `locked → available`。Inventory mutation
+以 `MANDATORY` 加入外层事务。
 
-`PaymentApplicationService`
-
-编排：
-
-Order API
-→ `WAIT_PAY → PAID`
-
-Inventory API
-→ `locked → sold`
-
-取消：
-
-`CancellationApplicationService`
-
-编排：
-
-Order API
-→ `WAIT_PAY → CANCELLED`
-
-Inventory API
-→ `locked → available`
-
-退款：
-
-`RefundApplicationService`
-
-编排：
-
-Order API
-→ `PAID → REFUNDED`
-
-Inventory API
-→ `sold → available`
-
-必要时再协调 Ticket API。
+未来 Refund 的事务所有者尚未冻结；不得预设 `RefundApplicationService`、
+Order Service 或 Ticket Service 为所有者。
 
 Order 模块不得直接访问 Inventory 的：
 
@@ -272,11 +260,9 @@ Order 模块不得直接访问 Inventory 的：
 
 # 8. Reservation
 
-FLASH 抢票使用：
-
-`reservationId`
-
-作为异步请求的重要业务标识。
+Reservation business concept 属于 `FUTURE / FROZEN / NOT_IMPLEMENTED`；精确
+DB 表、字段、状态持久化模型、`reservation_id` 与幂等 Key 为
+`FUTURE / NOT_YET_FROZEN / NOT_IMPLEMENTED`。
 
 Reservation 表示：
 
@@ -288,21 +274,21 @@ TicketOrder 表示：
 
 两者不得混为同一业务对象。
 
-Reservation 对外主要状态：
+以下状态仅为未来方向示例，不构成当前持久化模型 Freeze：
 
 - `PROCESSING`
 - `SUCCESS`
 - `FAILED`
 
-SUCCESS 时应能够关联：
-
-`orderNo`
-
-相同业务请求的重复处理不得创建多个有效 Reservation / Order 结果。
+相同业务请求的重复处理不得创建多个有效 Reservation / Order 结果；具体业务
+标识与约束在 FLASH 实现阶段冻结。
 
 ---
 
 # 9. FLASH 创建订单幂等
+
+本节主链路为 `FUTURE / FROZEN / NOT_IMPLEMENTED`。Reservation 精确持久化
+模型、`reservation_id` 与精确幂等 Key 尚未冻结。
 
 FLASH 核心链路：
 
@@ -318,17 +304,8 @@ RabbitMQ 采用 At-Least-Once。
 
 同一消息可能被处理多次。
 
-相同：
-
-`reservationId`
-
-不得创建多个订单。
-
-数据库层保持：
-
-`UNIQUE(reservation_id)`
-
-作为最终幂等安全线之一。
+相同业务请求不得创建多个订单；数据库最终安全线必须在精确业务 Key 冻结后
+通过后续 Migration 设计，当前不得预设 `UNIQUE(reservation_id)`。
 
 Consumer 的目标不是保证：
 
@@ -341,6 +318,9 @@ Consumer 的目标不是保证：
 ---
 
 # 10. MQ Consumer
+
+本节描述 FLASH 未来冻结的 At-Least-Once + Idempotent Consumer 方向，当前
+尚未实现，且消息拓扑与精确幂等 Key 尚未冻结。
 
 Order Consumer 必须正确处理：
 
@@ -369,6 +349,9 @@ RabbitMQ 只会投递一次。
 ---
 
 # 11. Transactional Outbox
+
+Transactional Outbox 是 FLASH 可靠发布的
+`FUTURE / FROZEN / NOT_IMPLEMENTED` 方向；精确 Schema 与状态机尚未冻结。
 
 需要同时保证：
 
@@ -406,11 +389,17 @@ Outbox Publisher 必须允许重复发送。
 
 # 12. 数据库安全线
 
-`ticket_order` 至少保持：
+Phase 3 Baseline 中 `ticket_order` 至少保持：
 
 `UNIQUE(order_no)`
 
-`UNIQUE(reservation_id)`
+`UNIQUE(user_id, session_id, purchase_guard)`
+
+其中 generated `purchase_guard` 用于阻止同一用户、同一 Session 的重复
+`WAIT_PAY` / `PAID` Order，同时允许 `CLOSED` / `CANCELLED` 后重新下单。
+
+FLASH Reservation concept 已冻结，但精确持久化字段与数据库唯一安全线尚未
+冻结；不得提前要求 `UNIQUE(reservation_id)`。
 
 核心索引支持：
 
@@ -418,17 +407,19 @@ Outbox Publisher 必须允许重复发送。
 
 `(user_id, created_at)`
 
-Session 状态查询：
+Session 逻辑关联查询：
 
-`(session_id, status)`
+`(session_id)`
+
+`(session_id, status)` 当前暂缓，只有真实查询路径需要时再评估。
 
 超时扫描：
 
-`(status, expire_time)`
+`(status, expire_at)`
 
 修改相关 Schema 时必须确认：
 
-- reservationId 幂等约束仍然存在
+- 当前已冻结的幂等约束仍然存在；未来 FLASH 约束以其实现阶段 Freeze 为准
 - 超时扫描索引仍然有效
 - 主要查询路径仍然合理
 
@@ -483,42 +474,36 @@ Redis、RabbitMQ、MySQL 之间出现异常时，
 1. 状态转换是否合法。
 2. 重复调用是否幂等。
 3. 并发状态竞争是否只能成功一次。
-4. MQ 重复消费是否安全。
-5. reservationId 是否仍能保证唯一业务结果。
+4. MQ 重复消费是否安全（未来 FLASH）。
+5. 已冻结的未来业务 Key 是否仍能保证唯一业务结果；当前不得预设 `reservationId`。
 6. 失败路径是否可能产生部分成功。
-7. 跨模块副作用是否由 ApplicationService 正确编排。
+7. 跨模块副作用是否由对应 Frozen transaction owner 正确编排；当前 NORMAL 为 Order Service。
 8. 数据库唯一约束是否仍然有效。
 
 ---
 
 # 15. 最低测试要求
 
-根据修改范围至少覆盖：
+根据当前实现与修改范围至少覆盖：
 
 - `WAIT_PAY → PAID`
 - `WAIT_PAY → CANCELLED`
-- `WAIT_PAY → TIMEOUT`
-- `PAID → REFUNDED`
+- `WAIT_PAY → CLOSED`
 - 非法状态转换
 - 重复支付
 - 重复取消
-- 重复退款
 - 支付与取消竞争
 - 支付与超时竞争
-- MQ 重复消息
-- Consumer 异常
-- reservationId 幂等
-- Outbox 重复发送
+
+未来 Refund / FLASH / MQ / Outbox 进入实际实现 Scope 后，才按届时冻结的
+Contract 增加 `PAID → REFUNDED`、重复退款、重复消息、Consumer、业务 Key
+幂等与 Outbox 重复发送测试。
 
 至少必须证明：
-
-重复 MQ 消息不会创建重复订单。
 
 重复支付不会执行多次有效支付状态转换。
 
 重复取消不会导致库存恢复多次。
-
-重复退款不会执行多次有效退款。
 
 ---
 
@@ -537,11 +522,11 @@ Redis、RabbitMQ、MySQL 之间出现异常时，
 
 优先维护：
 
-`docs/architecture/reservation-flow.md`
+`docs/specification/eventhub-v1.md`
 
-`docs/architecture/consistency.md`
+`docs/database/schema.md`
 
-`docs/middleware/rabbitmq.md`
+`docs/development/progress.md`
 
 本文件只维护 Order 模块长期稳定的不变量和行为约束。
 

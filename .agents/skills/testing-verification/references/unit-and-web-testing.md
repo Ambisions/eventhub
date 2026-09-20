@@ -47,21 +47,20 @@ Unit Test 应：
 
 Mockito 用于隔离真正的协作者。
 
-例如测试：
-
-PaymentApplicationService
-
-可以 Mock：
+例如测试一个真实由 App 拥有的跨领域 ApplicationService 时，可以 Mock：
 
 - Order API
 - Inventory API
-- Ticket API
+- 该 Use Case 实际依赖的 Module API
 
 验证：
 
-- Orchestration
+- 已冻结的 Orchestration
 - Branch
 - Failure Propagation
+
+当前 Phase 6 NORMAL Order Lifecycle 是窄例外，测试应直接验证 Order Service
+拥有的事务编排，不应虚构 `PaymentApplicationService`。
 
 Mockito 不能证明：
 

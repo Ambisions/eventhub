@@ -3,7 +3,7 @@
 仅当任务涉及：
 
 - WAIT_PAY Timeout
-- TTL + DLX
+- Future timeout trigger mechanism（TTL / DLX 等尚未冻结）
 - Notification
 - RabbitMQ Failure
 - Outbox Backlog
@@ -25,19 +25,8 @@ WAIT_PAY 支付窗口：
 
 @Scheduled
 
-后续 MQ 方案 V1 优先：
-
-TTL
-+
-DLX
-
-例如：
-
-order.delay.queue
-→ TTL
-→ DLX
-→ order.timeout.queue
-→ Timeout Consumer
+未来将 Timeout trigger 改为 MQ 属于 `FUTURE / PLANNED`。TTL / DLX、Delayed
+Message Plugin 或其他机制均为 `NOT_YET_FROZEN`，本 Reference 不预设队列拓扑。
 
 V1 不默认引入：
 
@@ -55,12 +44,12 @@ Timeout Message 到达：
 
 不能直接认为：
 
-订单必须变 TIMEOUT。
+订单必须进入超时终态。
 
 合法转换仍然：
 
 WAIT_PAY
-→ TIMEOUT
+→ CLOSED
 
 必须继续检查：
 
@@ -71,7 +60,7 @@ WAIT_PAY
 
 PAID
 CANCELLED
-TIMEOUT
+CLOSED
 
 的订单不得被延迟消息再次产生副作用。
 
@@ -230,7 +219,7 @@ Correctness Mechanism。
 - messageId
 - messageType
 - businessKey
-- reservationId / orderNo
+- frozen business key / orderNo
 - retryCount
 - traceId
 

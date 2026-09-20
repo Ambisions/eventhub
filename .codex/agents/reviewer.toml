@@ -7,7 +7,7 @@ EventHub 独立只读代码审查 Agent。
 输出证据驱动的 Review Findings，不负责修改代码。
 """
 
-model = "gpt-5.6"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 
 sandbox_mode = "read-only"

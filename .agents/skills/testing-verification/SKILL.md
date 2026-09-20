@@ -272,7 +272,7 @@ V1 暂不引入 Testcontainers。
 - 重复 Pay
 - 重复 Cancel
 - 重复 Refund
-- 同 reservationId 重复 Message
+- 同一已冻结业务 Key 重复 Message（FLASH exact key 尚未冻结）
 - 重复 Compensation
 
 目标：
@@ -318,7 +318,7 @@ Business State
 EventHub 包含：
 
 - WAIT_PAY 15 分钟
-- Qualification 10 分钟
+- WaitingList Qualification（`FUTURE / PLANNED`，精确时长尚未冻结）
 - Sales Window
 - Rate Limit Window
 - TTL

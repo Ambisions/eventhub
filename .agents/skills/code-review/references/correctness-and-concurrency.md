@@ -97,15 +97,15 @@ GET
 
 # 4. Order State Machine
 
-合法转换：
+当前持久状态转换：
 
 WAIT_PAY → PAID
 
 WAIT_PAY → CANCELLED
 
-WAIT_PAY → TIMEOUT
+WAIT_PAY → CLOSED（Timeout 是 operation / trigger，`CLOSED` 是持久状态）
 
-PAID → REFUNDED
+未来冻结转换：PAID → REFUNDED（`FUTURE / FROZEN / NOT_IMPLEMENTED`）
 
 检查是否出现：
 
@@ -159,6 +159,9 @@ affectedRows
 
 # 7. Purchase Eligibility
 
+本节退款规则属于 `FUTURE / FROZEN / NOT_IMPLEMENTED`；不要因尚未实现而
+降级为 Not Yet Frozen，也不要把它当成当前 Production behavior。
+
 检查：
 
 Refund
@@ -185,7 +188,10 @@ purchased
 
 如果业务要求共同成功 / 失败，
 
-检查 ApplicationService 是否建立了正确 Local Transaction。
+检查已冻结的事务所有者是否建立了正确 Local Transaction。
+
+Phase 6 NORMAL 的明确例外由 `eventhub-order` 拥有事务，并按
+`Order → Inventory` 调用 Public API；通用默认仍是 App ApplicationService。
 
 例如 NORMAL：
 
@@ -242,16 +248,9 @@ Idempotent。
 
 # 11. WaitingList
 
-检查：
-
-- userId + sessionId 唯一
-- FIFO / Score 语义
-- Qualification 10 分钟
-- Qualification Expired 后推进下一人
-
-获得资格：
-
-不得自动创建 WAIT_PAY Order。
+WaitingList capability 为 `FUTURE / PLANNED / NOT_IMPLEMENTED`。只有实现任务
+冻结具体 Contract 后，才检查唯一约束、FIFO / Score、资格时长和推进规则；
+不得把这些细节当成当前或已冻结规则。
 
 ---
 

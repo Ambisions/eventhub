@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.eventhub.order.mapper.OrderMapper">
+
+    <resultMap id="orderEntityResultMap" type="com.eventhub.order.repository.OrderEntity">
+        <id column="id" property="id"/>
+        <result column="order_no" property="orderNo"/>
+        <result column="user_id" property="userId"/>
+        <result column="session_id" property="sessionId"/>
+        <result column="status" property="status"/>
+        <result column="expire_at" property="expireAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insertWaitPay"
+            parameterType="com.eventhub.order.repository.OrderEntity"
+            useGeneratedKeys="true"
+            keyProperty="id"
+            keyColumn="id">
+        INSERT INTO ticket_order (order_no, user_id, session_id, status, expire_at)
+        VALUES (#{orderNo}, #{userId}, #{sessionId}, #{status}, #{expireAt})
+    </insert>
+
+    <select id="selectOrderById" resultMap="orderEntityResultMap">
+        SELECT id, order_no, user_id, session_id, status, expire_at, created_at, updated_at
+        FROM ticket_order
+        WHERE id = #{orderId}
+    </select>
+
+    <select id="selectByIdAndUserId" resultMap="orderEntityResultMap">
+        SELECT id, order_no, user_id, session_id, status, expire_at, created_at, updated_at
+        FROM ticket_order
+        WHERE id = #{orderId}
+          AND user_id = #{userId}
+    </select>
+
+    <update id="markPaidIfWaitPayAndNotExpired">
+        UPDATE ticket_order
+        SET status = 'PAID',
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE id = #{orderId}
+          AND user_id = #{userId}
+          AND status = 'WAIT_PAY'
+          AND expire_at &gt; #{paymentNow}
+    </update>
+
+    <update id="cancelIfWaitPay">
+        UPDATE ticket_order
+        SET status = 'CANCELLED',
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE id = #{orderId}
+          AND user_id = #{userId}
+          AND status = 'WAIT_PAY'
+    </update>
+
+    <select id="findExpiredWaitPayIds" resultType="java.lang.Long">
+        SELECT id
+        FROM ticket_order
+        WHERE status = 'WAIT_PAY'
+          AND expire_at &lt;= #{scanNow}
+        ORDER BY expire_at ASC, id ASC
+        LIMIT #{batchSize}
+    </select>
+
+    <update id="closeIfWaitPayAndExpired">
+        UPDATE ticket_order
+        SET status = 'CLOSED',
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE id = #{orderId}
+          AND status = 'WAIT_PAY'
+          AND expire_at &lt;= #{scanNow}
+    </update>
+</mapper>

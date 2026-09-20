@@ -13,15 +13,15 @@
 
 # 1. 模块职责
 
-`eventhub-inventory` 负责：
+`eventhub-inventory` 当前负责：
 
 - Session 库存
 - 库存初始化、锁定和释放
-- Redis FLASH 库存
-- 抢票相关 Redis Reservation 状态
-- Redis Lua
-- WaitingList
-- 抢票相关限流
+
+未来方向中，FLASH Redis 高并发库存、Lua 原子 Reservation 与 Fail Fast 是
+`FUTURE / FROZEN / NOT_IMPLEMENTED`；WaitingList 与限流 capability 为
+`FUTURE / PLANNED / NOT_IMPLEMENTED`。Reservation 精确持久化模型、
+`reservation_id`、WaitingList Schema / ZSet / 资格时长与约束尚未冻结。
 
 本模块不负责：
 
@@ -31,7 +31,9 @@
 - HTTP Controller
 - 跨领域业务流程编排
 
-跨领域流程由 `eventhub-app` 中的 ApplicationService 编排。
+跨领域流程默认由 `eventhub-app` 的 ApplicationService 编排。当前 Phase 6
+NORMAL Order Lifecycle 是窄例外：`eventhub-order` 拥有事务编排并通过
+Inventory Public API 调用本模块；Inventory 不拥有 Order lifecycle。
 
 ---
 
@@ -87,7 +89,7 @@ Event 必须通过 EventSession 对应具体库存。
 `lockedStock - 1`
 `availableStock + 1`
 
-退款：
+未来退款（`FUTURE / FROZEN / NOT_IMPLEMENTED`）：
 
 `soldStock - 1`
 `availableStock + 1`
@@ -131,6 +133,10 @@ MySQL 条件 UPDATE 负责 NORMAL 模式下的原子库存竞争控制。
 
 # 5. FLASH 抢票规则
 
+本节描述 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的 FLASH 核心方向，不是当前
+Production behavior。Reservation business concept 已冻结，但精确持久化模型、
+字段与 `reservation_id` 尚未冻结。
+
 FLASH 模式使用 Redis 作为高并发库存执行层。
 
 抢票资格判断和对应 Redis 状态变化必须通过 Lua 保持必要的原子性。
@@ -155,8 +161,7 @@ FLASH 抢票原子过程需要保持以下状态的一致变化：
 - 库存检查
 - 库存扣减
 - occupied-users 更新
-- reservationId 记录
-- 临时 Reservation 状态建立
+- Reservation business concept 建立
 
 调整上述职责时，必须首先验证：
 
@@ -229,6 +234,10 @@ FLASH Redis Failure
 
 # 9. 库存释放必须幂等
 
+当前 NORMAL 释放由 Order 事务所有者通过 `MANDATORY` Inventory mutation
+参与同一事务。以下 Reservation / MQ / Compensation 规则属于未来方向；精确
+Reservation identity 与持久化模型尚未冻结。
+
 同一个 Reservation 对应的库存只能被有效释放一次。
 
 库存释放不能只是无条件：
@@ -256,37 +265,12 @@ FLASH Redis Failure
 
 # 10. WaitingList
 
-同一个：
+WaitingList capability 为 `FUTURE / PLANNED / NOT_IMPLEMENTED`。精确 Schema、
+唯一约束、Redis ZSet、排序规则、资格时长与 MQ 流程尚未冻结，不得作为当前
+Inventory Contract。
 
-`userId + sessionId`
-
-不得出现重复有效候补资格。
-
-库存释放后：
-
-队首符合条件的用户获得购买资格。
-
-购买资格有效期：
-
-10 分钟。
-
-获得候补资格：
-
-不等于自动创建订单。
-
-禁止因为候补成功直接自动创建：
-
-`WAIT_PAY`
-
-订单。
-
-资格过期后：
-
-当前资格进入 `EXPIRED`
-
-然后继续处理下一位符合条件的用户。
-
-WaitingList 的顺序和资格变化必须可验证。
+未来实现前必须先冻结 WaitingList Contract；是否自动创建 Order、资格状态词汇、
+过期后的推进方式与对应测试均不得由本文件提前决定。
 
 ---
 
@@ -354,19 +338,12 @@ Inventory 对外能力只能通过：
 
 Inventory 同样不得直接访问其他业务模块的 Mapper 或 Repository。
 
-支付、取消、退款等跨领域流程由 `eventhub-app` 的 ApplicationService 编排。
+当前 Phase 6 NORMAL Reserve、Pay、Cancel 与 Timeout 由 `eventhub-order` 拥有
+事务编排，并按 `Order → Inventory` 调用本模块 Public API。Inventory mutation
+使用 `MANDATORY` 加入 Order 外层事务。
 
-例如支付流程应由：
-
-PaymentApplicationService
-
-分别调用：
-
-Order API
-→ `WAIT_PAY → PAID`
-
-Inventory API
-→ `locked → sold`
+未来 Refund 的事务所有者尚未冻结；Inventory 只保留已经冻结的
+`sold → available` 业务方向，不拥有 Refund lifecycle。
 
 Order 模块不得直接操作 InventoryMapper。
 
@@ -456,11 +433,11 @@ FLASH 完成后必须增加对应的并发和集成验证。
 
 优先维护：
 
-`docs/architecture/reservation-flow.md`
+`docs/specification/eventhub-v1.md`
 
-`docs/middleware/redis.md`
+`docs/database/schema.md`
 
-`docs/architecture/consistency.md`
+`docs/development/progress.md`
 
 本文件只维护 Inventory 长期稳定的行为约束。
 

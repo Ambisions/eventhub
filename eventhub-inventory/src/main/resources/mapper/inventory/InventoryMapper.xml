@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.eventhub.inventory.mapper.InventoryMapper">
+
+    <resultMap id="inventoryEntityResultMap" type="com.eventhub.inventory.repository.InventoryEntity">
+        <id column="id" property="id"/>
+        <result column="session_id" property="sessionId"/>
+        <result column="total_stock" property="totalStock"/>
+        <result column="available_stock" property="availableStock"/>
+        <result column="locked_stock" property="lockedStock"/>
+        <result column="sold_stock" property="soldStock"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="inventoryColumns">
+        id, session_id, total_stock, available_stock, locked_stock, sold_stock, created_at, updated_at
+    </sql>
+
+    <select id="selectBySessionId" resultMap="inventoryEntityResultMap">
+        SELECT <include refid="inventoryColumns"/>
+        FROM event_inventory
+        WHERE session_id = #{sessionId}
+    </select>
+
+    <update id="updateAvailableCapacity">
+        UPDATE event_inventory
+        SET total_stock = #{totalStock},
+            available_stock = #{totalStock},
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE session_id = #{sessionId}
+          AND locked_stock = 0
+          AND sold_stock = 0
+    </update>
+
+    <update id="lockOne">
+        UPDATE event_inventory
+        SET available_stock = available_stock - 1,
+            locked_stock = locked_stock + 1,
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE session_id = #{sessionId}
+          AND available_stock &gt; 0
+    </update>
+
+    <update id="confirmSoldOne">
+        UPDATE event_inventory
+        SET locked_stock = locked_stock - 1,
+            sold_stock = sold_stock + 1,
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE session_id = #{sessionId}
+          AND locked_stock &gt; 0
+    </update>
+
+    <update id="releaseOne">
+        UPDATE event_inventory
+        SET locked_stock = locked_stock - 1,
+            available_stock = available_stock + 1,
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE session_id = #{sessionId}
+          AND locked_stock &gt; 0
+    </update>
+</mapper>

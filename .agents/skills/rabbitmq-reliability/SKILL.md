@@ -135,7 +135,7 @@ Idempotent Consumer
 - Manual ACK
 - Duplicate Delivery
 - Consumer Crash
-- reservationId
+- frozen business key（FLASH exact key 尚未冻结）
 - DuplicateKeyException
 - Consumer Idempotency
 - Consumer Concurrency
@@ -164,7 +164,7 @@ Idempotent Consumer
 涉及：
 
 - WAIT_PAY Timeout
-- TTL + DLX
+- Future timeout trigger mechanism（TTL / DLX 等尚未冻结）
 - Notification
 - MQ Unavailable
 - Outbox Backlog
@@ -184,16 +184,9 @@ Idempotent Consumer
 
 # 4. Message Identity 与 Business Identity 必须区分
 
-核心消息统一使用 Message Envelope。
-
-至少包含：
-
-- messageId
-- messageType
-- occurredAt
-- businessKey
-- traceId（允许为空）
-- payload
+未来消息应使用稳定 Message Envelope，并区分 Message Identity 与 Business
+Identity；精确字段集合、命名与版本策略尚未冻结，必须在 Message Contract
+实现阶段决定。
 
 必须区分：
 
@@ -203,11 +196,8 @@ Idempotent Consumer
 
 业务唯一标识。
 
-例如 FLASH Order：
-
-`reservationId`
-
-才是 Order Create Consumer 的核心业务幂等 Key。
+未来 FLASH Order 必须使用稳定业务 Key 实现 Consumer 幂等，但 Reservation
+精确持久化模型、`reservation_id` 与最终幂等 Key 尚未冻结。
 
 同一个业务请求可能因为 Outbox Retry 被多次发送。
 
@@ -302,15 +292,8 @@ ACK 前 JVM Crash
 
 重复消息不得产生重复有效业务结果。
 
-Order Create 当前优先使用：
-
-reservationId
-+
-业务状态
-+
-`UNIQUE(reservation_id)`
-
-作为幂等安全线。
+未来 FLASH Order Create 必须以业务状态和数据库唯一安全线保证幂等；精确
+业务 Key 与 `reservation_id` 尚未冻结，不得预设 `UNIQUE(reservation_id)`。
 
 V1 不默认建立通用：
 
@@ -368,25 +351,21 @@ RabbitMQ Timeout Message 的语义是：
 合法转换仍然必须是：
 
 WAIT_PAY
-→ TIMEOUT
+→ CLOSED
 
 已经：
 
 PAID
 CANCELLED
-TIMEOUT
+CLOSED
 
 的订单收到延迟消息：
 
 不得产生新的超时业务副作用。
 
-V1 延迟消息优先：
-
-TTL
-+
-DLX
-
-不默认引入 Delayed Message Plugin。
+未来是否以 RabbitMQ 触发 Timeout 为 `FUTURE / PLANNED`；TTL / DLX、Delayed
+Message Plugin 或其他机制均为 `NOT_YET_FROZEN`。Timeout Message 只可作为
+trigger，持久转换仍是 `WAIT_PAY → CLOSED`。
 
 详细规则见：
 
@@ -433,13 +412,13 @@ DLX
 检查：
 
 WAIT_PAY
-→ TIMEOUT
+→ CLOSED
 
 以及：
 
 PAID + Timeout Message
 
-不会错误变成 TIMEOUT。
+不会错误变成 `CLOSED`。Timeout 是 operation / trigger，`CLOSED` 是持久状态。
 
 RabbitMQ 可靠性关键路径优先使用真实 Broker 验证。
 
@@ -478,9 +457,8 @@ Retry / DLQ / Compensation
 
 RabbitMQ 重要设计变化时检查：
 
-`docs/middleware/rabbitmq.md`
-
-以及必要架构文档。
+`docs/specification/eventhub-v1.md`、`docs/database/schema.md` 与
+`docs/development/progress.md`。只有相关 middleware 文档真实存在时再读取。
 
 典型变化：
 

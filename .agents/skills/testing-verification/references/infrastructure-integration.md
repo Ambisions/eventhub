@@ -86,7 +86,8 @@ H2 Green：
 
 `ticket_order`
 
-reservationId 唯一。
+当前 `order_no` 以及 `(user_id, session_id, purchase_guard)` 唯一。未来 FLASH
+Reservation 精确字段与唯一安全线尚未冻结。
 
 `ticket`
 
@@ -94,7 +95,7 @@ userId + sessionId 唯一。
 
 `waiting_list`
 
-userId + sessionId 唯一。
+WaitingList capability 为 Future Planned，Schema 与唯一约束尚未冻结。
 
 数据库安全线必须通过数据库行为证明。
 

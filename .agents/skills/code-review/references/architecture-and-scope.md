@@ -62,6 +62,11 @@ Controller 不应该：
 - 写状态机
 - 操作 Mapper / Repository
 
+以上是通用默认。EventHub 若存在用户批准并冻结的窄领域生命周期例外，Review
+应以对应 Frozen Contract 为准。当前 Phase 6 NORMAL Reserve / Pay / Cancel /
+Timeout 由 `eventhub-order` 拥有事务编排，App 仍只负责 HTTP、Security、
+Scheduler 与 Composition Root；不得把该例外扩展成通用架构法则。
+
 ---
 
 # 3. ApplicationService
@@ -70,12 +75,8 @@ ApplicationService 应围绕：
 
 明确 Use Case。
 
-例如：
-
-- Reservation
-- Payment
-- Cancellation
-- Refund
+具体 ApplicationService 只在其 Use Case 所有权已冻结且真实需要 App 编排时建立；
+不得用 Reservation / Payment / Cancellation / Refund 名称预先决定事务所有权。
 
 检查是否出现：
 

@@ -118,14 +118,13 @@ Controller
 
 ApplicationService 围绕明确的跨领域 Use Case 组织。
 
-当前核心包括：
+对于遵循仓库级默认编排规则的复杂跨领域 Use Case，可以建立命名明确的
+ApplicationService。
 
-- `ReservationApplicationService`
-- `PaymentApplicationService`
-- `CancellationApplicationService`
-- `RefundApplicationService`
-- `WaitingListApplicationService`
-- `EventPublishApplicationService`
+Phase 6 NORMAL Order Lifecycle 是已冻结的窄例外：Reserve、Pay、Cancel 和
+Timeout 由 `eventhub-order` 拥有事务编排；App 仅提供 Controller、Security、
+Scheduler、配置、Runtime Adapter 与 Composition Root。Refund 与 WaitingList
+的未来事务所有者尚未冻结，不得把某个 App ApplicationService 写成硬性要求。
 
 禁止创建系统级超级 Service，例如：
 
@@ -155,19 +154,19 @@ EventHub 当前运行于：
 
 对于只涉及同一 MySQL 的同步跨模块 Use Case，如果多个数据库变化必须共同成功或共同失败：
 
-事务边界优先由 ApplicationService 定义。
+事务边界默认由对应跨领域 ApplicationService 定义；已冻结的领域生命周期
+例外以其 Contract 为准。
 
-例如 NORMAL 抢票：
+当前 Phase 6 NORMAL 抢票由 Order Service 建立本地事务：
 
-ReservationApplicationService
+Order API / Order Service
 
-→ Inventory API
+→ INSERT `WAIT_PAY` Order
+
+→ Inventory Public API
 执行条件库存更新
 
-→ Order API
-创建 WAIT_PAY Order
-
-如果两步需要原子提交，应参与同一个 Spring Local Transaction。
+如果两步必须原子成功或失败，应处于同一个 Spring 本地事务中。
 
 跨 Maven Module：
 
@@ -235,7 +234,7 @@ MySQL 成功
 
 # 8. Reservation 编排
 
-`ReservationApplicationService` 必须区分：
+Reservation 设计必须区分：
 
 NORMAL
 
@@ -245,8 +244,10 @@ FLASH
 
 NORMAL：
 
-MySQL 条件 UPDATE
-→ 创建 WAIT_PAY Order
+Order Service 在同一 Local Transaction 中：
+
+INSERT `WAIT_PAY` Order
+→ Inventory Public API 执行 MySQL 条件 UPDATE
 
 FLASH：
 
@@ -257,80 +258,37 @@ Redis Lua
 
 不要为了代码复用把 NORMAL 和 FLASH 强行统一。
 
-库存并发规则属于 Inventory。
+库存并发规则属于 Inventory，订单状态规则属于 Order。
 
-订单状态规则属于 Order。
-
-App 只负责流程编排。
+App 默认负责复杂跨领域流程编排；当前 NORMAL Order Lifecycle 例外只负责
+HTTP / Security / Scheduler 接入与运行时组装，不拥有 Reserve、Pay、Cancel、
+Timeout 的事务编排。
 
 ---
 
 # 9. 支付、取消与退款
 
-支付由：
+当前 Phase 6 支付与取消由 `eventhub-order` 拥有本地事务，并按固定顺序调用：
 
-`PaymentApplicationService`
+支付：`WAIT_PAY → PAID` → Inventory `locked → sold`
 
-协调：
+取消：`WAIT_PAY → CANCELLED` → Inventory `locked → available`
 
-Order API
-→ `WAIT_PAY → PAID`
+只有 Order 条件状态更新成功，才允许执行一次库存副作用。
 
-Inventory API
-→ `locked → sold`
-
-必要时协调 Ticket API。
-
-取消由：
-
-`CancellationApplicationService`
-
-协调：
-
-Order API
-→ `WAIT_PAY → CANCELLED`
-
-Inventory API
-→ `locked → available`
-
-退款由：
-
-`RefundApplicationService`
-
-协调：
-
-Order API
-→ `PAID → REFUNDED`
-
-Inventory API
-→ `sold → available`
-
-必要时协调 Ticket API。
-
-重复支付、取消、退款必须依赖模块 API 的状态约束和幂等能力。
-
-退款恢复库存，但不恢复用户再次参与同一 Session 抢票的资格。
+退款属于 `FUTURE / FROZEN / NOT_IMPLEMENTED`：`PAID → REFUNDED`、退款幂等、
+Inventory `sold → available` 以及同一 Session 的历史购买资格不恢复均已冻结。
+Refund API、事务所有者、Ticket 精确退款状态与 MQ 实现仍为
+`FUTURE / NOT_YET_FROZEN / NOT_IMPLEMENTED`，不得把 `RefundApplicationService`
+写成强制所有者。
 
 ---
 
 # 10. WaitingList
 
-WaitingList 的：
-
-- 队列
-- 顺序
-- 资格
-- 过期规则
-
-属于 Inventory。
-
-`WaitingListApplicationService` 负责跨领域 Use Case 协调。
-
-候补获得购买资格：
-
-不等于自动创建 WAIT_PAY Order。
-
-App 层不得改变这一业务语义。
+WaitingList capability 为 `FUTURE / PLANNED / NOT_IMPLEMENTED`。具体 Schema、
+Redis ZSet、资格时长、唯一约束与跨领域事务所有者尚未冻结；不得把
+`WaitingListApplicationService` 写成硬性要求。
 
 ---
 
@@ -480,11 +438,11 @@ PAID + locked → sold + 重复调用
 取消：
 CANCELLED + locked → available + 重复调用
 
-退款：
+未来退款（`FUTURE / FROZEN / NOT_IMPLEMENTED`）：
 REFUNDED + sold → available + 历史购买资格不恢复
 
-FLASH：
-Redis + Reservation + MQ + Consumer + 重复消息 + 失败恢复
+未来 FLASH（核心方向 `FUTURE / FROZEN / NOT_IMPLEMENTED`）：
+Redis + Lua + Reservation + Outbox + MQ + Consumer + 重复消息 + 失败恢复
 
 不要把 HTTP 200 当成完整业务正确性的证明。
 
@@ -504,13 +462,11 @@ Redis + Reservation + MQ + Consumer + 重复消息 + 失败恢复
 
 优先维护：
 
-`docs/architecture/architecture.md`
+`docs/specification/eventhub-v1.md`
 
-`docs/architecture/module-dependencies.md`
+`docs/database/schema.md`
 
-`docs/architecture/reservation-flow.md`
-
-`docs/architecture/consistency.md`
+`docs/development/progress.md`
 
 本文件只维护 App 层长期稳定的组装、编排和事务边界规则。
 

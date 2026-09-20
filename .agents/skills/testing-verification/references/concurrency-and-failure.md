@@ -94,7 +94,7 @@ Order / Reservation 数量合理。
 - Cancel x2
 - Refund x2
 - Timeout x2
-- Same reservationId xN
+- Same frozen business key xN（FLASH exact key 尚未冻结）
 - Compensation xN
 
 有效业务结果：
@@ -125,9 +125,7 @@ At-Least-Once 环境下主动制造：
 
 Duplicate Delivery。
 
-例如：
-
-相同 reservationId 重复发送。
+例如未来 FLASH 实现中，相同业务 Key 重复发送；精确 `reservation_id` 尚未冻结。
 
 最终验证：
 

@@ -6,7 +6,7 @@
 - Duplicate Delivery
 - Consumer Idempotency
 - Consumer Crash
-- reservationId
+- frozen business key（FLASH exact key 尚未冻结）
 - Duplicate Key
 - Consumer Concurrency
 
@@ -62,13 +62,9 @@ DB Success：
 
 优先使用自然业务 Key。
 
-Order Create：
-
-reservationId
-
-数据库：
-
-`UNIQUE(reservation_id)`
+未来 FLASH Order Create 必须选择稳定自然业务 Key 并配置数据库唯一安全线。
+Reservation concept 已冻结，但精确持久化模型、`reservation_id` 与幂等 Key
+尚未冻结，不能预设 `UNIQUE(reservation_id)`。
 
 典型处理：
 
@@ -83,13 +79,7 @@ Receive
 
 # 4. V1 不建 consumed_message
 
-Order Create 已存在：
-
-reservationId
-+
-Unique Constraint
-
-所以 V1 不默认建立：
+未来 Order Create 优先复用届时冻结的业务表 Unique Constraint，所以当前不默认建立：
 
 `consumed_message`
 
@@ -115,7 +105,7 @@ DuplicateKeyException
 
 例如：
 
-相同 reservationId 已有合法 Order：
+相同业务 Key 已有合法 Order：
 
 属于可能的正常 Duplicate Delivery，
 可按幂等成功处理。
@@ -196,7 +186,7 @@ Rabbit Listener
 
 - Normal Message
 - Duplicate Message
-- Same reservationId Multiple Delivery
+- Same Business Key Multiple Delivery
 - Consumer Exception
 - Consumer Restart
 - DB Commit Before ACK Crash
@@ -204,6 +194,6 @@ Rabbit Listener
 
 Order Create 最终必须证明：
 
-同一个 reservationId
+同一个已冻结业务 Key
 
 只能形成一个合法 Order。

@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: eventhub
+  datasource:
+    url: "jdbc:mysql://127.0.0.1:3306/${MYSQL_DATABASE:eventhub}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
+    username: ${MYSQL_USER:eventhub}
+    password: ${MYSQL_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      database: 0
+      connect-timeout: 2s
+      timeout: 2s
+  rabbitmq:
+    host: ${RABBITMQ_HOST:127.0.0.1}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_DEFAULT_USER}
+    password: ${RABBITMQ_DEFAULT_PASS}
+    connection-timeout: 5s
+
+eventhub:
+  order:
+    timeout:
+      enabled: true
+      fixed-delay-ms: 5000
+      batch-size: 100
+  security:
+    jwt:
+      secret-base64: ${EVENTHUB_JWT_SECRET_BASE64}

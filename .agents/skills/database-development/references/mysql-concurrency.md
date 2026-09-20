@@ -104,13 +104,8 @@ Conditional UPDATE
 +
 Unique Constraint
 
-例如 FLASH Order：
-
-Consumer Idempotency
-+
-`UNIQUE(reservation_id)`
-
-共同保证一个 Reservation 不产生多个 Order。
+未来 FLASH Order 必须以 Consumer Idempotency 和数据库唯一安全线共同保证一个
+业务请求不产生多个 Order；精确业务 Key 与 `reservation_id` 尚未冻结。
 
 应用层幂等不能取代数据库 Constraint。
 
@@ -122,9 +117,7 @@ Consumer Idempotency
 
 必须结合具体 Constraint 和业务语义判断。
 
-例如：
-
-重复消费导致相同 reservationId 已存在 Order：
+例如未来重复消费命中同一业务唯一约束：
 
 可能属于正常幂等结果。
 

@@ -164,33 +164,21 @@ description: >
 
 常见映射：
 
-总体架构：
+总体架构、模块边界与 NORMAL / FLASH 业务 Contract：
 
-`docs/architecture/architecture.md`
+`docs/specification/eventhub-v1.md`
 
-模块依赖：
+当前实现进度与已验证能力：
 
-`docs/architecture/module-dependencies.md`
-
-NORMAL / FLASH 抢票：
-
-`docs/architecture/reservation-flow.md`
-
-最终一致性：
-
-`docs/architecture/consistency.md`
+`docs/development/progress.md`
 
 数据库：
 
 `docs/database/`
 
-Redis：
+Redis / RabbitMQ：
 
-`docs/middleware/redis.md`
-
-RabbitMQ：
-
-`docs/middleware/rabbitmq.md`
+优先读取对应 Skill 与当前真实实现；只有相关 middleware 文档真实存在时再读取。
 
 项目当前进度：
 

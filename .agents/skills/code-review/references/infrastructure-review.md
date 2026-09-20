@@ -38,15 +38,15 @@
 
 `ticket_order`
 → UNIQUE(order_no)
-→ UNIQUE(reservation_id)
+→ UNIQUE(user_id, session_id, purchase_guard)
 
 `ticket`
-→ UNIQUE(ticket_code)
+→ UNIQUE(ticket_no)
 → UNIQUE(order_id)
 → UNIQUE(user_id, session_id)
 
-`waiting_list`
-→ UNIQUE(user_id, session_id)
+Reservation persistence model / `reservation_id` 与 WaitingList Schema / 约束均为
+未来未冻结内容，不能作为当前数据库安全线。
 
 Review 不应无意删除这些安全线。
 
@@ -121,11 +121,8 @@ DB COMMIT
 
 是否仍然安全。
 
-Order Create：
-
-reservationId + UNIQUE(reservation_id)
-
-应继续兜底。
+未来 FLASH Order Create 仍必须有数据库幂等安全线，但精确业务 Key 与
+`reservation_id` 尚未冻结；Review 不得提前要求 `UNIQUE(reservation_id)`。
 
 ---
 

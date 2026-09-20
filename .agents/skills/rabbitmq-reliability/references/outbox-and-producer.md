@@ -15,7 +15,7 @@
 
 # 1. Message Envelope
 
-V1 核心消息统一包含：
+未来 Message Envelope 的候选字段包括：
 
 - messageId
 - messageType
@@ -23,6 +23,8 @@ V1 核心消息统一包含：
 - businessKey
 - traceId（允许为空）
 - payload
+
+这不是 Frozen 字段集合；命名、必选性与版本策略在 Message Contract 实现阶段冻结。
 
 消息体只携带：
 
@@ -50,11 +52,8 @@ Message Contract 变化时同步检查：
 
 表示消息对应的业务事实。
 
-例如：
-
-Order Create：
-
-businessKey = reservationId
+未来 FLASH Order Create 必须选择稳定业务 Key；Reservation 精确持久化模型、
+`reservation_id` 与最终幂等 Key 尚未冻结。
 
 同一个 Business Key 可以因为：
 
@@ -107,7 +106,7 @@ Publisher 可以恢复发送。
 但是仍可能出现：
 
 MQ 已收到
-→ Outbox 尚未标 SENT
+→ Outbox 尚未标记为已发送（精确状态名尚未冻结）
 → Publisher Crash
 
 应用恢复后：
@@ -124,7 +123,7 @@ Consumer 仍必须幂等。
 
 # 5. Outbox Record
 
-根据实际实现至少考虑：
+以下仅为候选字段，不是 Frozen Outbox Schema：
 
 - messageId
 - messageType
@@ -140,7 +139,7 @@ Consumer 仍必须幂等。
 - sentAt
 - lastError
 
-不要为了未来假设无限增加字段。
+实现阶段必须按真实恢复需求冻结最小 Schema；不要为了未来假设无限增加字段。
 
 ---
 

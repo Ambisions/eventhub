@@ -293,15 +293,16 @@ Controller 不负责复杂业务逻辑。
 
 # 8. ApplicationService 规则
 
-跨领域 Use Case 使用 ApplicationService 编排。
+跨领域 Use Case 默认由 `eventhub-app` 的 ApplicationService 编排。
 
-例如：
+如果存在用户明确批准并进入 Frozen Contract 的领域生命周期例外，
+则以该例外为准；这不表示业务模块可以自由扩张编排职责。
 
-`ReservationController`
-→ `ReservationApplicationService`
-→ Event API
-→ Inventory API
-→ Order API
+当前明确例外仅包括 Phase 6 NORMAL Order Lifecycle：Reserve、Pay、Cancel
+和 Timeout 由 `eventhub-order` 拥有事务编排，Controller / Scheduler 通过
+Order Public API 进入，由 Order Service 按 `Order → Inventory` 调用相关
+公开 API。`eventhub-app` 仍负责 HTTP、Security、Scheduler、配置和
+Composition Root。
 
 禁止：
 
@@ -1091,3 +1092,31 @@ RabbitMQ 用于异步和削峰，但消费者必须考虑重复消息。
 而是：
 
 “能够清楚解释为什么每一个关键技术存在，以及它解决了什么真实问题。”
+
+---
+
+# 30. Sandbox 与权限边界
+
+- Main Codex 默认使用 `workspace-write + on-request`，不得默认切换为 Full Access / `danger-full-access`。
+- 三个 Subagent `explorer`、`reviewer`、`test-reviewer` 默认保持 Read Only；不得仅为方便而扩大写权限。
+- 默认关闭 Network Access；只有当前任务确实需要外部访问时才申请临时权限。
+- `.git/`、`.agents/`、`.codex/` 属于受保护的控制层；不得绕过权限边界自行修改。
+- Git commit / push / branch / merge / rebase / reset 及其他已定义的敏感 Git 操作仍遵守项目 Git Safety 规则。
+- 不得在 Repository 中保存真实 Production Secret、Token、密码或其他敏感凭据。
+- 权限不足时优先请求最小必要权限，不得为了消除权限摩擦而扩大为长期 Full Access。
+
+---
+
+# 31. Development Workflow
+
+- 默认由 Main Codex 负责理解任务、制定计划、实现、执行针对性验证并检查最终 Diff。
+- Existing Implementation 不清楚时按需调用 Explorer；高风险代码变更按需调用 Reviewer；重要正确性声明需要独立验证时按需调用 Test Reviewer。
+- Subagent 调度遵循 `docs/development/agent-dispatch-policy.md`，不得机械执行固定 Agent 流水线。
+- 流程深度必须与任务风险匹配：低风险修改走最小流程，核心并发、一致性、事务和可靠性功能需要更强 Verification。
+- 重要实现变化完成后同步必要的 Living Documentation；最终不得隐藏执行 commit、push、merge 等 Git Integration。
+
+---
+
+# 32. 语言与输出
+
+默认使用中文进行分析和报告，并采用“中文为主 + 必要英文技术术语”的表达方式。标题可使用“中文（English）”。代码、命令、路径、配置字段、状态值、模型 ID 及必要专业术语保留英文；除原始日志或技术内容确有需要外，避免整段英文输出。

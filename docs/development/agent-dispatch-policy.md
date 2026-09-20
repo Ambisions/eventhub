@@ -268,7 +268,7 @@ Main Codex 完成一个 Logical Change Batch 后问：
 ```text
 WAIT_PAY → PAID
 WAIT_PAY → CANCELLED
-WAIT_PAY → TIMEOUT
+WAIT_PAY → CLOSED
 PAID → REFUNDED
 ```
 
@@ -770,3 +770,9 @@ V1 默认不并行 Fan-out。
 本文属于 Agent Engineering 的 Living Documentation。
 
 未来只有在真实 EventHub 开发实践证明当前 Dispatch Policy 存在明显成本或缺陷时才调整，不为了增加 Agent 数量或流程复杂度而扩展。
+
+---
+
+# 17. Maintenance Record
+
+- Agent runtime compatibility fix: Reviewer/Test Reviewer model identifiers changed from generic `gpt-5.6` to concrete Codex-supported `gpt-5.6-sol` after real spawn verification.

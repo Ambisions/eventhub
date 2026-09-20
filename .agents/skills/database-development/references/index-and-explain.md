@@ -38,23 +38,15 @@
 
 用于用户订单查询。
 
-`ticket_order(session_id, status)`
-
-用于 Session 状态查询。
-
-`ticket_order(status, expire_time)`
+`ticket_order(status, expire_at)`
 
 用于订单超时扫描。
 
-`waiting_list(session_id, status, joined_at)`
+`ticket_order(session_id, status)` 当前暂缓；只有真实查询路径需要时再评估。
 
-用于候补顺序查询。
+WaitingList capability 为 `FUTURE / PLANNED`，具体 Schema 与 Index 尚未冻结。
 
-`waiting_list(status, qualification_expire_time)`
-
-用于资格过期扫描。
-
-这些是当前设计，不代表未来永远不能调整。
+以上仅列当前已冻结索引与明确的 Deferred boundary，不代表未来永远不能调整。
 
 调整必须来自真实查询变化。
 

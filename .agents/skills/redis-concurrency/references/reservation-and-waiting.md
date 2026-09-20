@@ -11,6 +11,12 @@
 
 时读取。
 
+状态边界：Reservation business concept 为 `FUTURE / FROZEN / NOT_IMPLEMENTED`；
+精确持久化模型、字段、`reservation_id` 与幂等 Key 尚未冻结。WaitingList
+capability 为 `FUTURE / PLANNED / NOT_IMPLEMENTED`；Schema、Redis ZSet、
+资格时长、唯一约束与 MQ flow 尚未冻结。以下具体数据结构均是设计候选，
+不是 Current/Frozen Contract。
+
 ---
 
 # 1. occupied-users
@@ -51,7 +57,7 @@ PAID
 
 即认为已经成功购买过。
 
-即使：
+未来即使：
 
 PAID → REFUNDED
 
@@ -71,10 +77,10 @@ Historical Purchase Eligibility。
 
 # 3. reservation-map
 
-FLASH 使用：
+FLASH 可以在实现阶段评估：
 
 userId + sessionId
-→ reservationId
+→ stable reservation business key
 
 识别当前用户是否已经存在抢票请求。
 
@@ -82,7 +88,7 @@ Lua 应优先检查 Existing Reservation。
 
 重复请求应尽量返回：
 
-Existing reservationId
+Existing reservation result
 
 而不是重新扣库存并创建第二套流程。
 
@@ -120,7 +126,7 @@ Redis Key 缺失或过期：
 
 # 5. WaitingList
 
-WaitingList 可以使用：
+WaitingList 未来可以评估：
 
 Redis ZSet。
 
@@ -133,11 +139,7 @@ joinedAt
 
 Redis 用于高效排队和调度。
 
-MySQL 继续承担最终唯一安全线：
-
-userId + sessionId
-
-不能存在多个有效 Waiting 记录。
+具体 MySQL 唯一安全线在 WaitingList Schema 冻结后确定。
 
 ---
 
@@ -147,9 +149,7 @@ userId + sessionId
 
 队首用户获得限时购买资格。
 
-当前业务有效期：
-
-10 分钟。
+精确资格有效期尚未冻结。
 
 获得资格：
 
@@ -174,7 +174,7 @@ Qualification TTL 必须严格对应业务时长。
 ## Reservation
 
 - Duplicate Request
-- Existing reservationId
+- Existing reservation result
 - PROCESSING
 - SUCCESS
 - FAILED
@@ -189,9 +189,4 @@ Qualification TTL 必须严格对应业务时长。
 
 ## WaitingList
 
-- Duplicate Join
-- FIFO / Score
-- Qualification
-- 10-minute Expiration
-- Next Candidate
-- Qualification 不自动创建 Order
+- 按实现阶段冻结的 Contract 验证 Duplicate Join、排序、Qualification、过期与推进

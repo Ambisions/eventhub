@@ -95,7 +95,7 @@ locked
 
 - Duplicate Pay
 - CANCELLED 后 Pay
-- TIMEOUT 后 Pay
+- CLOSED 后 Pay
 - Pay vs Cancel
 - Pay vs Timeout
 
@@ -128,7 +128,7 @@ Duplicate Cancel：
 验证：
 
 WAIT_PAY
-→ TIMEOUT
+→ CLOSED
 
 并释放：
 
@@ -139,7 +139,7 @@ locked
 
 PAID
 CANCELLED
-TIMEOUT
+CLOSED
 
 重复 Timeout Trigger：
 
@@ -148,6 +148,9 @@ TIMEOUT
 ---
 
 # 6. Refund
+
+本节为 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的业务性质验证清单，不是当前
+Production test claim。
 
 验证：
 
@@ -176,6 +179,8 @@ Duplicate Refund：
 ---
 
 # 7. FLASH
+
+本节为 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的核心方向验证清单。
 
 FLASH 验证不能只停在 Lua。
 
@@ -231,9 +236,7 @@ MySQL 最终事实
 
 # 9. RabbitMQ Order Create
 
-主动重复发送相同：
-
-reservationId。
+主动重复发送相同业务请求。精确业务 Key / `reservation_id` 尚未冻结。
 
 最终：
 
@@ -244,6 +247,8 @@ reservationId。
 ---
 
 # 10. Outbox
+
+本节适用于未来 FLASH Outbox 实现；方向已冻结，精确 Schema / 状态机尚未冻结。
 
 根据实现验证：
 
@@ -269,15 +274,9 @@ Publisher Duplicate：
 
 # 11. WaitingList
 
-至少根据修改范围验证：
-
-- Normal Join
-- Duplicate Join
-- FIFO / Score Order
-- Qualification
-- 10-minute Expiration
-- Next Candidate
-- Qualification 不自动创建 WAIT_PAY Order
+WaitingList capability 为 `FUTURE / PLANNED / NOT_IMPLEMENTED`。具体实现冻结后
+再按真实 Contract 验证 Join、排序、Qualification、过期与推进；当前不把
+Schema、ZSet、资格时长或唯一约束列为硬性断言。
 
 ---
 

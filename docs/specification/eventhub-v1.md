@@ -162,13 +162,16 @@ WAIT_PAY
 
 ```text
 WAIT_PAY
-→ TIMEOUT
+→ CLOSED
 
 ```
 
 之后允许重新抢票。
 
 但是一旦：
+
+> Ticket issuance 的业务触发方向为 `FUTURE / FROZEN / NOT_IMPLEMENTED`；
+> 同步/异步方式、事务边界与 MQ flow 尚未冻结。
 
 ```text
 PAID
@@ -182,6 +185,20 @@ PAID
 
 ## 3.3 订单生命周期
 
+当前 `CURRENT / FROZEN / IMPLEMENTED` 持久状态与转换为：
+
+```text
+WAIT_PAY → PAID
+WAIT_PAY → CANCELLED
+WAIT_PAY → CLOSED
+```
+
+Timeout 是 operation / trigger，`CLOSED` 才是持久状态。
+
+未来退款转换 `PAID → REFUNDED` 为
+`FUTURE / FROZEN / NOT_IMPLEMENTED`。下图同时展示当前状态与这一 Future
+Contract，不表示 `REFUNDED` 已进入当前 Migration 或 Production behavior。
+
 ```text
                      PAY
 WAIT_PAY ─────────────────────→ PAID
@@ -190,20 +207,21 @@ WAIT_PAY ─────────────────────→ PAID
    ├── CANCEL ─→ CANCELLED        ▼
    │                           REFUNDED
    │
-   └── TIMEOUT ─→ TIMEOUT
+   └── TIMEOUT ─→ CLOSED
 
 ```
 
-其中：
+其中当前：
 
 ```text
 CANCELLED
-TIMEOUT
-REFUNDED
+CLOSED
 
 ```
 
 为终态。
+
+未来 `REFUNDED` 为退款终态。
 
 ---
 
@@ -256,7 +274,7 @@ available +1
 
 ```
 
-退款：
+未来退款（`FUTURE / FROZEN / NOT_IMPLEMENTED`）：
 
 ```text
 sold -1
@@ -271,9 +289,9 @@ available +1
 抢票成功：
 
 ```text
-锁库存
+创建 WAIT_PAY Order
 ↓
-创建 WAIT_PAY
+条件锁定库存
 ↓
 15分钟支付窗口
 
@@ -284,7 +302,7 @@ available +1
 ```text
 WAIT_PAY
 ↓
-TIMEOUT
+CLOSED
 ↓
 释放库存
 
@@ -294,16 +312,19 @@ TIMEOUT
 
 ## 3.6 候补规则
 
+WaitingList capability 为 `FUTURE / PLANNED / NOT_IMPLEMENTED`。本节仅保留
+方向性示例；Schema、唯一约束、Redis ZSet、排序、资格时长与 MQ flow 尚未冻结。
+
 售罄后用户可以进入 WaitingList。
 
-库存释放时：
+未来可能在库存释放时：
 
 ```text
-WaitingList 第一名
+WaitingList 候选用户
 ↓
 获得购买资格
 ↓
-10分钟有效期
+限时购买资格（精确时长尚未冻结）
 
 ```
 
@@ -509,24 +530,28 @@ common
 ```text
 User
 用户资料
-用户状态
 用户查询
 
 ```
+
+Phase 5 不实现用户状态、封禁、删除、Soft Delete 或 Admin User Management。
 
 ---
 
 ## eventhub-auth
 
 ```text
+注册
 登录
-JWT
+Access Token JWT
 Spring Security
-角色鉴权
-JWT Blacklist
-CurrentUser
+USER / ADMIN Authority
+Authenticated Principal
 
 ```
+
+Phase 5 使用 Stateless Client Logout，不实现 Refresh Token、Redis Session、
+Token Rotation、Token Blacklist 或 Device Session。
 
 ---
 
@@ -551,9 +576,9 @@ Inventory
 库存初始化
 库存锁定
 库存释放
-Redis库存
-Lua
-WaitingList
+
+Future Frozen：FLASH Redis库存、Lua atomic reservation
+Future Planned：WaitingList、限流
 
 ```
 
@@ -567,11 +592,11 @@ WaitingList
 订单创建
 支付
 取消
-退款
 超时
 订单状态机
-Reservation
-Outbox
+
+Future Frozen：退款业务规则、FLASH Reservation concept、Outbox/RabbitMQ direction
+Not Yet Frozen：Refund owner/API、Reservation persistence model、exact MQ contract
 
 ```
 
@@ -582,10 +607,10 @@ Outbox
 ## eventhub-ticket
 
 ```text
-Ticket创建
+Future Frozen：PAID 触发 Ticket issuance
 Ticket查询
 Ticket核销
-Ticket失效
+Not Yet Frozen：issuance timing/transaction、refund Ticket state/失效方式
 
 ```
 
@@ -594,10 +619,8 @@ Ticket失效
 ## eventhub-notification
 
 ```text
-支付成功通知
-候补成功通知
-订单通知
-活动提醒
+Future Planned：Notification capability
+Not Yet Frozen：Exchange、Queue、Routing Key、persistence、retry/DLQ topology
 
 ```
 
@@ -622,7 +645,7 @@ eventhub-app
 
 Controller 统一放在 app。
 
-跨领域流程由：
+跨领域流程默认由：
 
 ```text
 ApplicationService
@@ -631,10 +654,15 @@ ApplicationService
 
 编排。
 
+已批准并冻结的窄例外以对应 Contract 为准。当前 Phase 6 NORMAL Order
+Lifecycle 的 Reserve、Pay、Cancel、Timeout 由 `eventhub-order` 拥有本地事务
+编排，按 `Order → Inventory` 调用 Public API；App 仍负责 HTTP、Security、
+Scheduler、配置与 Composition Root。
+
 例如：
 
 ```text
-ReservationApplicationService
+ReservationApi / OrderService.reserve
         │
         ├── EventService
         ├── InventoryService
@@ -653,37 +681,37 @@ ReservationApplicationService
 3. 禁止跨模块调用其他模块 Mapper。
 4. 跨模块只能通过公开 Service/API。
 5. Repository / Mapper 只属于自己的领域。
-6. Application Service 负责跨领域编排。
+6. Application Service 默认负责跨领域编排；明确冻结的领域生命周期例外除外。
 7. Domain Service 负责本领域业务规则。
 
 ---
 
 # 9. 核心数据库表
 
-V1 核心业务表：
+Phase 3 第一版数据库 Baseline 冻结为六张表：
 
 ```text
-user
-event
-event_session
+users
+events
+event_sessions
 event_inventory
 ticket_order
 ticket
-waiting_list
 
 ```
 
-高并发可靠性增加：
+以下表不进入第一版 Baseline，只有对应功能实际实现时才通过后续
+Flyway Migration 增加：
 
 ```text
-reservation_request
-mq_outbox
-
+WaitingList persistence
+Reservation persistence
+Transactional Outbox persistence
+Consumer idempotency persistence（only if required）
+Notification delivery persistence（only if required）
 ```
 
-共：
-
-**9 张核心表。**
+以上为 capability direction，不冻结表名、字段、状态机或约束。
 
 ---
 
@@ -710,27 +738,35 @@ Session : Inventory = 1:1
 ```text
 UNIQUE(order_no)
 
-UNIQUE(reservation_id)
+UNIQUE(user_id, session_id, purchase_guard)
 
 ```
+
+其中 generated `purchase_guard` 对 `WAIT_PAY` / `PAID` 生成 `1`，
+对 `CLOSED` / `CANCELLED` 生成 `NULL`。它阻止同一用户、同一场次出现
+重复有效订单，同时允许关闭或取消后重新下单。
 
 索引：
 
 ```text
 (user_id, created_at)
 
-(session_id, status)
+(session_id)
 
-(status, expire_time)
+(status, expire_at)
 
 ```
+
+`(session_id, status)` 暂缓，待真实查询路径出现后再评估。
+Reservation concept 属于 Future Frozen direction；精确持久化模型、
+`reservation_id` 与最终唯一安全线尚未冻结，必须在 FLASH 实现阶段决定。
 
 ---
 
 ## ticket
 
 ```text
-UNIQUE(ticket_code)
+UNIQUE(ticket_no)
 
 UNIQUE(order_id)
 
@@ -746,35 +782,31 @@ UNIQUE(user_id, session_id)
 
 ## waiting\_list
 
-```text
-UNIQUE(user_id, session_id)
-
-INDEX(session_id, status, joined_at)
-
-INDEX(status, qualification_expire_time)
-
-```
+WaitingList capability 为 `FUTURE / PLANNED / NOT_IMPLEMENTED`；表结构、唯一
+约束与索引尚未冻结。
 
 ---
 
 # 11. NORMAL 普通抢票流程
 
 ```text
-POST Reservation
+POST /api/sessions/{sessionId}/orders
       ↓
-检查Session
+读取 Published Session
       ↓
-检查售票时间
-      ↓
-检查是否购买过
-      ↓
-MySQL条件UPDATE库存
+检查 [saleStartAt, saleEndAt)
       ↓
 INSERT WAIT_PAY Order
+      ↓
+MySQL条件UPDATE库存
       ↓
 COMMIT
 
 ```
+
+NORMAL 不执行 Active Order 查询前置检查。同一用户、同一 Session 的有效购买由
+`uk_ticket_order_effective_purchase` 在 INSERT 时作为最终并发安全线；只有 Order
+INSERT 成功后才调用库存条件 UPDATE，二者加入同一个本地 MySQL 事务。
 
 库存 SQL：
 
@@ -812,7 +844,7 @@ SELECT FOR UPDATE
 
 # 12. FLASH 高并发抢票流程
 
-最终流程：
+以下核心链路为 `FUTURE / FROZEN / NOT_IMPLEMENTED`：
 
 ```text
 User
@@ -837,7 +869,11 @@ MySQL
 
 ```
 
-接口首先返回：
+Reservation business concept 已冻结；精确持久化模型、字段、`reservation_id`
+与幂等 Key 尚未冻结。以下返回值与查询路径仅为
+`FUTURE / PLANNED` 方向，不构成完整 HTTP Contract Freeze。
+
+接口方向可能首先返回：
 
 ```text
 PROCESSING
@@ -858,6 +894,10 @@ GET /reservations/{reservationId}
 ---
 
 # 13. Redis 数据设计
+
+本节为未来设计候选。FLASH Redis + Lua atomic reservation 与 Fail Fast 是
+Future Frozen direction；具体 Key、Reservation model 以及 WaitingList
+implementation 尚未冻结。
 
 ## 普通缓存
 
@@ -964,7 +1004,11 @@ DECR
 
 # 15. RabbitMQ 架构
 
-核心队列：
+FLASH 使用 Transactional Outbox → RabbitMQ → Idempotent Consumer 的方向为
+`FUTURE / FROZEN / NOT_IMPLEMENTED`。以下队列名只是设计示例，不构成拓扑
+Freeze；Notification topology 与 Timeout 的 TTL/DLX 等机制均尚未冻结。
+
+队列示例：
 
 ```text
 order.create.queue
@@ -996,7 +1040,7 @@ MySQL
 
 # 16. MQ 可靠性
 
-Producer：
+Producer reliability 方向（精确机制与 Outbox Schema 尚未冻结）：
 
 ```text
 Transactional Outbox
@@ -1008,13 +1052,13 @@ Persistent Message
 
 ```
 
-Consumer：
+Consumer reliability 方向（精确拓扑、Retry/DLQ 与业务 Key 尚未冻结）：
 
 ```text
 Manual ACK
 Retry
 DLQ
-reservation_id UNIQUE
+stable business-key database guard
 
 ```
 
@@ -1205,13 +1249,16 @@ Redis Lua Fixed Window
 
 ### 抢票
 
+本节为未来 FLASH 幂等方向；Reservation concept 已冻结，但精确 Key 与
+`reservation_id` 尚未冻结。
+
 ```text
 userId + sessionId
-→ reservationId
+→ stable reservation business key
 
 ```
 
-重复请求返回原 reservationId。
+重复请求返回已有业务结果。
 
 ### 支付
 
@@ -1229,6 +1276,8 @@ WAIT_PAY → CANCELLED
 
 ### 退款
 
+`FUTURE / FROZEN / NOT_IMPLEMENTED`：重复退款不得重复执行有效业务副作用。
+
 ```text
 PAID → REFUNDED
 
@@ -1237,9 +1286,11 @@ PAID → REFUNDED
 ### MQ
 
 ```text
-UNIQUE(reservation_id)
+stable business-key database guard
 
 ```
+
+Reservation 精确持久化模型、`reservation_id` 与精确幂等 Key 尚未冻结。
 
 ### 库存释放
 
@@ -1297,7 +1348,64 @@ Executors.newFixedThreadPool()
 
 ---
 
-# 23. 主要 REST API
+# 23. User / Auth API 与安全 Contract
+
+## Authority 与 Ownership
+
+Phase 5 只使用两个全局 Authority：
+
+```text
+USER
+ADMIN
+```
+
+Organizer 不是全局 Role。任何认证 `USER` 都可以创建 Event，创建后通过：
+
+```text
+events.organizer_user_id == authenticated user id
+```
+
+表达资源 Ownership。注册接口始终创建 `USER`，客户端不得提交或选择
+`ADMIN`。V1 不提供 Role 修改、Admin 授权或 RBAC 管理 API。Admin Provisioning
+属于 Operational / Bootstrap Concern。
+
+## Username 与 Password
+
+`username` 是唯一登录标识。注册与登录都必须先执行：
+
+```text
+trim → lowercase
+```
+
+最终只持久化 canonical username。长度为 3–64，允许字符为：
+
+```text
+a-z 0-9 . _ -
+```
+
+Password 长度为 8–64 characters，并作为 opaque secret 处理：不 trim、不
+lowercase、不执行 Unicode normalization。UTF-8 编码后超过 72 bytes 的输入必须
+拒绝，不能依赖 bcrypt 静默截断。生产实现使用 Spring Security
+`DelegatingPasswordEncoder`，默认编码器为 bcrypt。数据库只保存
+`password_hash`；任何 HTTP Response 均不得返回 Password 或 Password Hash。
+
+## JWT 与 Logout
+
+Phase 5 只签发 30 分钟 Access Token：
+
+```text
+Authorization: Bearer <token>
+algorithm: HS256
+issuer: eventhub
+claims: sub=userId, username, role, iat, exp, iss
+```
+
+HS256 Signing Secret 必须来自 Environment / Secret，不得硬编码、不得提供真实
+默认值，并且至少为 256-bit。本阶段不增加 `jti`、`deviceId` 或 `sessionId`。
+
+`POST /api/auth/logout` 的冻结语义是 Stateless Client Logout：服务端不维护
+Token Session、不写 Redis Blacklist；客户端删除 Access Token。已签发 Token 在
+`exp` 前仍然有效，因此不得宣称 Logout 会让旧 Token 立即失效。
 
 ## Auth
 
@@ -1310,6 +1418,11 @@ POST /api/auth/logout
 
 ```
 
+- Register Request 不允许包含 `role`。
+- Register 永远创建 `role = USER`。
+- Login identifier 只允许 canonical `username`，不支持 email 或 phone。
+- Logout 只要求有效 Access Token，不产生服务端 Token 状态。
+
 ---
 
 ## User
@@ -1321,9 +1434,62 @@ PUT /api/users/me
 
 ```
 
+User API 只覆盖当前用户资料，不提供用户列表、用户状态、删除或 Admin User
+Management。
+
 ---
 
-# 24. Event API
+# 24. Event / EventSession Contract
+
+## Ownership
+
+创建 Event 时，`organizer_user_id` 必须来自 Authenticated Principal，Create Event
+Request 不允许提交该字段。Event Module 接收调用方传入的 `currentUserId` 并执行：
+
+```text
+event.organizer_user_id == currentUserId
+```
+
+Ownership Check。Event Module 不因为 `organizer_user_id` Logical FK 依赖
+`eventhub-user` Mapper 或 API。
+
+## Event State Machine 与编辑规则
+
+```text
+DRAFT
+  └── submit → PENDING_REVIEW
+                   ├── approve → PUBLISHED
+                   └── reject  → REJECTED
+
+REJECTED
+  └── submit → PENDING_REVIEW
+```
+
+禁止增加 `REJECTED → DRAFT` 状态迁移。
+
+- `DRAFT`：Event 可编辑；Session 可新增/修改；可 submit。
+- `REJECTED`：Event 可编辑；Session 可新增/修改；可重新 submit。
+- `PENDING_REVIEW`：Event 不可修改；Session 不可新增/修改。
+- `PUBLISHED`：V1 Event 不可修改；V1 Session 不可新增/修改。
+- EventSession 没有独立状态机，其修改资格由所属 Event Status 决定。
+
+Reject Request 必须包含非空 `reason`，最大 500 characters。状态更新语义为：
+
+```text
+reject:   status = REJECTED,       rejection_reason = reason
+submit:   status = PENDING_REVIEW, rejection_reason = NULL
+approve:  status = PUBLISHED,      rejection_reason = NULL
+```
+
+Event Owner 查询自己被拒绝的 Event 时可以读取 `rejectionReason`；Anonymous
+Public Response 不暴露审核原因。
+
+## Public Visibility
+
+下列 Public API 只允许访问所属 Event 状态为 `PUBLISHED` 的资源。该限制必须在
+Backend 执行，不能依赖前端过滤或隐藏 ID。`GET /api/events/{eventId}` 永远保持
+Public Detail 语义；即使请求携带 Owner 或 Admin JWT，也不能通过该 Public URL
+读取非 Published Event 或自动切换为 Managed View。
 
 公开接口：
 
@@ -1341,6 +1507,8 @@ GET /api/sessions/{sessionId}
 Organizer：
 
 ```http
+GET /api/organizer/events/{eventId}
+
 POST /api/organizer/events
 
 PUT /api/organizer/events/{eventId}
@@ -1353,38 +1521,66 @@ POST /api/organizer/events/{eventId}/submit
 
 ```
 
+- Organizer 路由要求认证。
+- Organizer Detail 只允许 Event Owner，支持读取所有 Event 状态，并在 `REJECTED`
+  时向 Owner 返回 `rejectionReason`。
+- Event 不存在或不属于当前用户时统一返回 Not Found，避免资源枚举。
+- Create Event Request 不得包含 `organizer_user_id`。
+- Update、Session Management 与 Submit 只允许 Event Owner。
+
 Admin：
 
 ```http
+GET /api/admin/events/{eventId}
+
 POST /api/admin/events/{eventId}/approve
 
 POST /api/admin/events/{eventId}/reject
 
 ```
 
+- `/api/admin/**` 只允许 `ADMIN`。
+- Admin Detail 是只读审核视图，不授予 Organizer Update 或 Session Mutation 权限。
+- Reject Request 必须为 `{ "reason": "..." }`，最大 500 characters。
+- Admin 的 Review Authority 不自动授予 Organizer Update/Session CRUD 权限。
+
+## Phase 5 Security Matrix
+
+| API / Capability | Anonymous | Authenticated `USER` | Event Owner | `ADMIN` |
+| --- | --- | --- | --- | --- |
+| Register / Login | Allow | Allow | Allow | Allow |
+| Published Event / Session query | Allow | Allow | Allow | Allow |
+| Logout / `/api/users/me` | Deny | Allow | Allow | Allow |
+| Create Event | Deny | Allow | Allow | Allow as an authenticated user |
+| Update Event / manage Session / submit | Deny | Deny when not owner | Allow for owned Event | Only when also the Event Owner |
+| Approve / Reject | Deny | Deny | Deny unless separately `ADMIN` | Allow |
+| `/api/admin/**` | Deny | Deny | Deny unless separately `ADMIN` | Allow |
+
+Event Owner 是每个 Event 上动态判断的资源权限，不是 JWT Role。Admin Review
+Authority 也不构成对全部 Organizer Resource 的隐式 CRUD 权限。
+
 ---
 
 # 25. Reservation API
 
-核心接口：
+NORMAL 当前接口：
+
+```http
+POST /api/sessions/{sessionId}/orders
+
+```
+
+该接口需要 Bearer Token、无 Request Body，成功返回 `201 Created` 与当前
+`WAIT_PAY` Order；用户身份只来自 JWT Principal。
+
+FLASH 未来接口方向（`FUTURE / PLANNED`，完整 HTTP Contract 尚未冻结）：
 
 ```http
 POST /api/sessions/{sessionId}/reservations
 
 ```
 
-NORMAL：
-
-可能直接返回：
-
-```text
-orderNo
-
-```
-
-FLASH：
-
-返回：
+FLASH 可能返回：
 
 ```text
 reservationId
@@ -1416,28 +1612,49 @@ FAILED
 # 26. Order API
 
 ```http
-GET /api/orders
+GET /api/orders/{orderId}
 
-GET /api/orders/{orderNo}
+POST /api/orders/{orderId}/pay
 
-POST /api/orders/{orderNo}/pay
-
-POST /api/orders/{orderNo}/cancel
-
-POST /api/orders/{orderNo}/refund
+POST /api/orders/{orderId}/cancel
 
 ```
+
+以上接口均要求 Bearer Token，并且只能查询或操作当前用户自己的 Order。不存在的
+Order 与其他用户的 Order 都统一返回 `ORDER_NOT_FOUND`，避免通过 ID 枚举资源。
+
+支付仅允许未过期的 `WAIT_PAY` Order 原子转换为 `PAID`，随后在同一 Local
+Transaction 中将一份库存从 `locked_stock` 转换到 `sold_stock`。当
+`paymentNow >= expire_at` 时拒绝支付。
+
+主动取消仅允许 `WAIT_PAY` Order 转换为 `CANCELLED`，随后在同一 Local
+Transaction 中将一份库存从 `locked_stock` 释放回 `available_stock`。已过期但仍为
+`WAIT_PAY` 的 Order 允许主动取消。Order Conditional UPDATE 的 affected-row 结果是
+库存副作用的唯一执行门槛，因此重复请求以及 Pay / Cancel 竞争都最多产生一次库存变更。
+
+Timeout Scanner 以数据库为事实来源，按固定延迟扫描一批满足
+`status = WAIT_PAY AND expire_at <= scanNow` 的 Order，并按
+`expire_at ASC, id ASC` 稳定排序。每个候选 Order 使用独立 Local Transaction 执行
+`WAIT_PAY -> CLOSED`，随后将一份库存从 `locked_stock` 释放回
+`available_stock`；只有 Order Conditional UPDATE 成功的执行者才能触发库存释放。
+单个 Order 失败不会回滚或阻断同批其他候选，重复扫描和并发 Pay / Cancel / Timeout
+竞争最多产生一次终态迁移与一次库存副作用。
+
+Order 列表、Ticket、退款与支付提供方集成仍属于后续 Batch。
 
 ---
 
 # 27. Ticket API
 
+Ticket API 为未来方向，精确路径与 authorization contract 尚未冻结。当前字段
+事实为 `ticket_no`；以下仅为使用 `ticketNo` 的路径示例。
+
 ```http
 GET /api/tickets
 
-GET /api/tickets/{ticketCode}
+GET /api/tickets/{ticketNo}
 
-POST /api/tickets/{ticketCode}/verify
+POST /api/tickets/{ticketNo}/verify
 
 ```
 
@@ -1446,6 +1663,9 @@ POST /api/tickets/{ticketCode}/verify
 ---
 
 # 28. WaitingList API
+
+WaitingList capability 为 `FUTURE / PLANNED`；以下路径只是候选，完整 HTTP
+Contract 尚未冻结。
 
 ```http
 POST /api/sessions/{sessionId}/waiting-list
@@ -1460,14 +1680,16 @@ GET /api/sessions/{sessionId}/waiting-list/me
 
 # 29. 核心 Application Services
 
-建议在：
+对真实由 App 拥有的复杂跨领域 Use Case，可以在：
 
 ```text
 eventhub-app/application
 
 ```
 
-建立：
+建立命名明确的 ApplicationService。当前 Phase 6 NORMAL Order Lifecycle 是窄
+例外，由 `eventhub-order` 拥有 Reserve / Pay / Cancel / Timeout 事务编排。
+Refund 与 WaitingList 的事务所有者尚未冻结，下列名称不得作为硬性要求：
 
 ```text
 ReservationApplicationService
@@ -1578,7 +1800,7 @@ Performance
 
 **让项目跑起来。**
 
-完成：
+未来能力方向：
 
 ```text
 Maven Multi Module
@@ -1587,13 +1809,12 @@ MySQL
 MyBatis-Plus
 Docker Compose
 
-user
-event
-event_session
+users
+events
+event_sessions
 event_inventory
 ticket_order
 ticket
-waiting_list
 
 ```
 
@@ -1624,43 +1845,43 @@ JWT登录成功
 
 # Day 2 —— NORMAL 普通抢票
 
-重点实现：
-
-```text
-ReservationApplicationService
-
-```
+当前实现由 `eventhub-order` 的 Order Service 拥有事务编排，不使用 App
+`ReservationApplicationService`。
 
 链路：
 
 ```text
 校验Session
 ↓
+INSERT WAIT_PAY Order
+↓
 MySQL条件UPDATE库存
-↓
-WAIT_PAY
-↓
-支付
-↓
+
+```
+
+当前 Phase 6 Batch 2 已完成 NORMAL Reservation 与 `WAIT_PAY` Order；Batch 3 已完成
+Owner-only Order Query、同步 Pay 与主动 Cancel；Batch 4 已完成数据库驱动的有界
+Timeout Scanner。以下能力保留到后续 Batch：
+
+```text
 Ticket
-
-```
-
-同时完成：
-
-```text
-取消
-超时
 退款
+支付提供方集成
 
 ```
 
-V1 超时先：
+V1 Timeout 已采用：
 
 ```text
-@Scheduled
+@Scheduled fixedDelay
+bounded database scan
+one independent Local Transaction per Order
+WAIT_PAY -> CLOSED + locked -> available
 
 ```
+
+RabbitMQ TTL / DLX、延迟消息以及 FLASH Reservation Timeout 不属于当前 NORMAL
+Timeout Baseline，留待后续阶段按真实需求演进。
 
 当日必须验证：
 
@@ -1752,6 +1973,8 @@ DLQ
 
 FLASH 升级：
 
+以下为未来路线图，不冻结 `reservationId`、HTTP path 或持久化模型：
+
 ```text
 Redis
 ↓
@@ -1764,7 +1987,7 @@ MySQL
 完成：
 
 ```text
-reservationId
+stable reservation business key
 
 ```
 
@@ -1779,33 +2002,22 @@ GET /reservations/{id}
 
 # Day 5 —— 最终一致性
 
+以下是未来路线图。Outbox / RabbitMQ 方向已冻结，但精确 Schema、消息类型、
+拓扑、Retry/DLQ、补偿模型与幂等 Key 尚未冻结。
+
 完成：
 
 ```text
-reservation_request
-
-mq_outbox
-
-OutboxPublisher
-
-ReconciliationJob
-
-Redis Compensation Lua
-
-Consumer Idempotency
+Reservation persistence（exact table / fields not yet frozen）
+Transactional Outbox（exact schema / states not yet frozen）
+Outbox Publisher
+Reconciliation / Redis Compensation
+Idempotent Consumer
 
 ```
 
-同时完成：
-
-```text
-ORDER_PAID
-ORDER_TIMEOUT
-ORDER_REFUNDED
-
-```
-
-相关状态同步。
+Message types 在实现阶段冻结；当前不预设 `ORDER_PAID`、`ORDER_TIMEOUT` 或
+`ORDER_REFUNDED` 等精确名称。
 
 这一天下班时重点测试：
 
@@ -1843,7 +2055,7 @@ User Rate Limit
 
 Session Rate Limit
 
-JWT Blacklist
+JWT Immediate Revocation / Blacklist（Phase 5 不实现，未来按需评估）
 
 reconciliationExecutor
 
@@ -1961,7 +2173,7 @@ Outbox
 退款
 候补
 缓存击穿
-JWT Blacklist
+JWT Immediate Revocation / Blacklist（Phase 5 不实现，未来按需评估）
 DLQ
 延迟关单
 线程池隔离
