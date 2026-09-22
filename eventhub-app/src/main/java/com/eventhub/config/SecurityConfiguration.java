@@ -109,6 +109,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/events/**", "/api/sessions/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/sessions/*/orders").authenticated()
                         .requestMatchers("/api/orders/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/tickets/*").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/auth/logout").authenticated()
                         .requestMatchers("/api/users/me", "/api/organizer/**").authenticated()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")

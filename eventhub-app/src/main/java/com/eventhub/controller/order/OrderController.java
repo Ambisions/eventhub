@@ -3,6 +3,7 @@ package com.eventhub.controller.order;
 import com.eventhub.controller.order.dto.OrderResponse;
 import com.eventhub.order.api.OrderCommandApi;
 import com.eventhub.order.api.OrderQueryApi;
+import com.eventhub.order.api.model.PaymentResult;
 import com.eventhub.security.EventHubAuthenticatedUser;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,10 +32,10 @@ public final class OrderController {
     }
 
     @PostMapping("/{orderId}/pay")
-    public OrderResponse pay(
+    public PaymentResult pay(
             @AuthenticationPrincipal EventHubAuthenticatedUser currentUser,
             @PathVariable long orderId) {
-        return OrderResponse.from(orderCommandApi.pay(currentUser.userId(), orderId));
+        return orderCommandApi.pay(currentUser.userId(), orderId);
     }
 
     @PostMapping("/{orderId}/cancel")

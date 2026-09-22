@@ -170,8 +170,8 @@ WAIT_PAY
 
 但是一旦：
 
-> Ticket issuance 的业务触发方向为 `FUTURE / FROZEN / NOT_IMPLEMENTED`；
-> 同步/异步方式、事务边界与 MQ flow 尚未冻结。
+> 当前 Phase 7 已实现 `PAID` 时同步签发 Ticket；Pay 的 Local MySQL Transaction
+> 由 `eventhub-order` 拥有，Ticket 签发作为 `MANDATORY` 事务参与者。
 
 ```text
 PAID
@@ -607,10 +607,9 @@ Not Yet Frozen：Refund owner/API、Reservation persistence model、exact MQ con
 ## eventhub-ticket
 
 ```text
-Future Frozen：PAID 触发 Ticket issuance
-Ticket查询
-Ticket核销
-Not Yet Frozen：issuance timing/transaction、refund Ticket state/失效方式
+Current Frozen / Implemented：PAID 同步签发 Ticket、Owner-only 单票查询
+Future：Ticket 列表与核销尚未实现
+Not Yet Frozen：refund Ticket state/失效方式
 
 ```
 
@@ -1623,9 +1622,12 @@ POST /api/orders/{orderId}/cancel
 以上接口均要求 Bearer Token，并且只能查询或操作当前用户自己的 Order。不存在的
 Order 与其他用户的 Order 都统一返回 `ORDER_NOT_FOUND`，避免通过 ID 枚举资源。
 
-支付仅允许未过期的 `WAIT_PAY` Order 原子转换为 `PAID`，随后在同一 Local
-Transaction 中将一份库存从 `locked_stock` 转换到 `sold_stock`。当
-`paymentNow >= expire_at` 时拒绝支付。
+支付仅允许未过期的 `WAIT_PAY` Order 原子转换为 `PAID`。`eventhub-order` 拥有
+Pay 的 Local MySQL Transaction，写入顺序为 Order `WAIT_PAY -> PAID`、Inventory
+`locked_stock -> sold_stock`、Ticket `INSERT VALID`；Ticket 签发以 `MANDATORY`
+加入同一事务，失败时整个 Pay 事务回滚。当 `paymentNow >= expire_at` 时拒绝支付。
+成功返回 `PaymentResult(OrderView, TicketView)`，调用方可从 `TicketView` 获得
+`ticketNo`。
 
 主动取消仅允许 `WAIT_PAY` Order 转换为 `CANCELLED`，随后在同一 Local
 Transaction 中将一份库存从 `locked_stock` 释放回 `available_stock`。已过期但仍为
@@ -1640,25 +1642,33 @@ Timeout Scanner 以数据库为事实来源，按固定延迟扫描一批满足
 单个 Order 失败不会回滚或阻断同批其他候选，重复扫描和并发 Pay / Cancel / Timeout
 竞争最多产生一次终态迁移与一次库存副作用。
 
-Order 列表、Ticket、退款与支付提供方集成仍属于后续 Batch。
+Order 列表、退款与支付提供方集成仍属于后续 Batch；Ticket 同步签发及单票查询
+已在 Phase 7 实现。
 
 ---
 
 # 27. Ticket API
 
-Ticket API 为未来方向，精确路径与 authorization contract 尚未冻结。当前字段
-事实为 `ticket_no`；以下仅为使用 `ticketNo` 的路径示例。
+当前已实现的 Ticket API：
 
 ```http
-GET /api/tickets
-
 GET /api/tickets/{ticketNo}
-
-POST /api/tickets/{ticketNo}/verify
 
 ```
 
-`verify` 主要由 Organizer/Admin 使用。
+该接口要求认证；`ticketNo` 由 `TKT-` 加大写 UUID32 组成。Validated JWT 经
+`EventHubAuthenticatedUser.userId()` 提供查询身份，数据库查询同时限定
+`ticket_no` 与 `user_id`。缺失、非 Owner、非法 `ticketNo` 均返回
+`TICKET_NOT_FOUND` / HTTP 404；ADMIN 非 Owner 不获得绕过权限。
+响应仅包含 `ticketNo`、`orderId`、`sessionId`、`status`、`createdAt`。
+
+Ticket 签发以数据库 `UNIQUE(ticket_no)`、`UNIQUE(order_id)` 和
+`UNIQUE(user_id, session_id)` 为最终安全线。重复 Order 或 User/Session 出票
+返回 `TICKET_ALREADY_ISSUED`，并回滚整个 Pay 事务；不返回已有 Ticket。
+
+Ticket 列表与 `VALID -> USED` 核销尚未实现。`GET /api/tickets`、
+`POST /api/tickets/{ticketNo}/verify` 仅为未来路径示例，精确路径和授权规则
+尚未冻结。
 
 ---
 
@@ -1859,12 +1869,11 @@ MySQL条件UPDATE库存
 
 ```
 
-当前 Phase 6 Batch 2 已完成 NORMAL Reservation 与 `WAIT_PAY` Order；Batch 3 已完成
+Phase 6 Batch 2 已完成 NORMAL Reservation 与 `WAIT_PAY` Order；Batch 3 已完成
 Owner-only Order Query、同步 Pay 与主动 Cancel；Batch 4 已完成数据库驱动的有界
-Timeout Scanner。以下能力保留到后续 Batch：
+Timeout Scanner。Phase 7 已在 Pay 中同步签发 Ticket。以下能力保留到后续 Batch：
 
 ```text
-Ticket
 退款
 支付提供方集成
 

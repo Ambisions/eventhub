@@ -20,6 +20,12 @@ import com.eventhub.order.api.error.OrderException;
 import com.eventhub.order.api.model.OrderStatus;
 import com.eventhub.order.mapper.OrderMapper;
 import com.eventhub.order.repository.OrderEntity;
+import com.eventhub.ticket.api.TicketIssuanceApi;
+import com.eventhub.ticket.api.command.IssueTicketCommand;
+import com.eventhub.ticket.api.error.TicketErrorCode;
+import com.eventhub.ticket.api.error.TicketException;
+import com.eventhub.ticket.api.model.TicketStatus;
+import com.eventhub.ticket.api.model.TicketView;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -32,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -196,19 +203,82 @@ class OrderServiceTest {
         TestContext context = contextAt(FIXED_INSTANT);
         OrderEntity waitPay = order(501L, USER_ID, OrderStatus.WAIT_PAY, RESERVATION_NOW.plusMinutes(1));
         OrderEntity paid = order(501L, USER_ID, OrderStatus.PAID, RESERVATION_NOW.plusMinutes(1));
+        TicketView ticket = ticket(501L, SESSION_ID);
         when(context.orderMapper().selectByIdAndUserId(501L, USER_ID)).thenReturn(waitPay, paid);
         when(context.orderMapper().markPaidIfWaitPayAndNotExpired(501L, USER_ID, RESERVATION_NOW))
                 .thenReturn(1);
+        when(context.ticketIssuanceApi().issueTicket(any())).thenReturn(ticket);
 
         var result = context.service().pay(USER_ID, 501L);
 
-        assertEquals(OrderStatus.PAID, result.status());
+        assertEquals(OrderStatus.PAID, result.order().status());
+        assertSame(ticket, result.ticket());
         assertEquals(1, context.clock().instantCalls());
         verify(context.publicEventQueryApi(), never()).getPublishedSession(anyLong());
-        InOrder order = inOrder(context.orderMapper(), context.inventoryReservationApi());
+        ArgumentCaptor<IssueTicketCommand> commandCaptor = ArgumentCaptor.forClass(IssueTicketCommand.class);
+        InOrder order = inOrder(
+                context.orderMapper(), context.inventoryReservationApi(), context.ticketIssuanceApi());
         order.verify(context.orderMapper()).markPaidIfWaitPayAndNotExpired(501L, USER_ID, RESERVATION_NOW);
         order.verify(context.inventoryReservationApi()).confirmSoldOne(SESSION_ID);
         order.verify(context.orderMapper()).selectByIdAndUserId(501L, USER_ID);
+        order.verify(context.ticketIssuanceApi()).issueTicket(commandCaptor.capture());
+        assertEquals(501L, commandCaptor.getValue().orderId());
+        assertEquals(USER_ID, commandCaptor.getValue().userId());
+        assertEquals(SESSION_ID, commandCaptor.getValue().sessionId());
+    }
+
+    @Test
+    void doesNotIssueTicketWhenPaymentInventoryConfirmationFails() {
+        TestContext context = contextAt(FIXED_INSTANT);
+        OrderEntity waitPay = order(501L, USER_ID, OrderStatus.WAIT_PAY, RESERVATION_NOW.plusMinutes(1));
+        when(context.orderMapper().selectByIdAndUserId(501L, USER_ID)).thenReturn(waitPay);
+        when(context.orderMapper().markPaidIfWaitPayAndNotExpired(501L, USER_ID, RESERVATION_NOW))
+                .thenReturn(1);
+        InventoryException failure = new InventoryException(InventoryErrorCode.INVENTORY_STATE_CONFLICT);
+        doThrow(failure).when(context.inventoryReservationApi()).confirmSoldOne(SESSION_ID);
+
+        InventoryException thrown = assertThrows(
+                InventoryException.class,
+                () -> context.service().pay(USER_ID, 501L));
+
+        assertSame(failure, thrown);
+        verify(context.ticketIssuanceApi(), never()).issueTicket(any());
+    }
+
+    @Test
+    void propagatesTicketExceptionAfterOrderAndInventorySteps() {
+        TestContext context = contextAt(FIXED_INSTANT);
+        OrderEntity waitPay = order(501L, USER_ID, OrderStatus.WAIT_PAY, RESERVATION_NOW.plusMinutes(1));
+        OrderEntity paid = order(501L, USER_ID, OrderStatus.PAID, RESERVATION_NOW.plusMinutes(1));
+        when(context.orderMapper().selectByIdAndUserId(501L, USER_ID)).thenReturn(waitPay, paid);
+        when(context.orderMapper().markPaidIfWaitPayAndNotExpired(501L, USER_ID, RESERVATION_NOW))
+                .thenReturn(1);
+        TicketException failure = new TicketException(TicketErrorCode.TICKET_ISSUANCE_FAILED);
+        when(context.ticketIssuanceApi().issueTicket(any())).thenThrow(failure);
+
+        TicketException thrown = assertThrows(
+                TicketException.class,
+                () -> context.service().pay(USER_ID, 501L));
+
+        assertSame(failure, thrown);
+    }
+
+    @Test
+    void propagatesUnknownTicketRuntimeFailure() {
+        TestContext context = contextAt(FIXED_INSTANT);
+        OrderEntity waitPay = order(501L, USER_ID, OrderStatus.WAIT_PAY, RESERVATION_NOW.plusMinutes(1));
+        OrderEntity paid = order(501L, USER_ID, OrderStatus.PAID, RESERVATION_NOW.plusMinutes(1));
+        when(context.orderMapper().selectByIdAndUserId(501L, USER_ID)).thenReturn(waitPay, paid);
+        when(context.orderMapper().markPaidIfWaitPayAndNotExpired(501L, USER_ID, RESERVATION_NOW))
+                .thenReturn(1);
+        RuntimeException failure = new RuntimeException("synthetic ticket infrastructure failure");
+        when(context.ticketIssuanceApi().issueTicket(any())).thenThrow(failure);
+
+        RuntimeException thrown = assertThrows(
+                RuntimeException.class,
+                () -> context.service().pay(USER_ID, 501L));
+
+        assertSame(failure, thrown);
     }
 
     @Test
@@ -227,6 +297,7 @@ class OrderServiceTest {
             assertEquals(OrderErrorCode.ORDER_EXPIRED, exception.getErrorCode());
             assertEquals(1, context.clock().instantCalls());
             verify(context.inventoryReservationApi(), never()).confirmSoldOne(anyLong());
+            verify(context.ticketIssuanceApi(), never()).issueTicket(any());
         }
     }
 
@@ -245,6 +316,7 @@ class OrderServiceTest {
 
             assertEquals(OrderErrorCode.ORDER_STATE_CONFLICT, exception.getErrorCode());
             verify(context.inventoryReservationApi(), never()).confirmSoldOne(anyLong());
+            verify(context.ticketIssuanceApi(), never()).issueTicket(any());
         }
 
         TestContext staleContext = contextAt(FIXED_INSTANT);
@@ -309,12 +381,15 @@ class OrderServiceTest {
     private static TestContext contextAt(Instant instant) {
         PublicEventQueryApi publicEventQueryApi = mock(PublicEventQueryApi.class);
         InventoryReservationApi inventoryReservationApi = mock(InventoryReservationApi.class);
+        TicketIssuanceApi ticketIssuanceApi = mock(TicketIssuanceApi.class);
         OrderMapper orderMapper = mock(OrderMapper.class);
         CountingClock clock = new CountingClock(Clock.fixed(instant, ZoneOffset.UTC));
         return new TestContext(
-                new OrderService(publicEventQueryApi, inventoryReservationApi, orderMapper, clock),
+                new OrderService(
+                        publicEventQueryApi, inventoryReservationApi, ticketIssuanceApi, orderMapper, clock),
                 publicEventQueryApi,
                 inventoryReservationApi,
+                ticketIssuanceApi,
                 orderMapper,
                 clock);
     }
@@ -363,10 +438,20 @@ class OrderServiceTest {
                 RESERVATION_NOW.minusDays(1));
     }
 
+    private static TicketView ticket(long orderId, long sessionId) {
+        return new TicketView(
+                "TKT-0123456789ABCDEF0123456789ABCDEF",
+                orderId,
+                sessionId,
+                TicketStatus.VALID,
+                RESERVATION_NOW);
+    }
+
     private record TestContext(
             OrderService service,
             PublicEventQueryApi publicEventQueryApi,
             InventoryReservationApi inventoryReservationApi,
+            TicketIssuanceApi ticketIssuanceApi,
             OrderMapper orderMapper,
             CountingClock clock) {
     }

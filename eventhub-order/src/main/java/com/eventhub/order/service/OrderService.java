@@ -18,8 +18,12 @@ import com.eventhub.order.api.error.OrderErrorCode;
 import com.eventhub.order.api.error.OrderException;
 import com.eventhub.order.api.model.OrderStatus;
 import com.eventhub.order.api.model.OrderView;
+import com.eventhub.order.api.model.PaymentResult;
 import com.eventhub.order.mapper.OrderMapper;
 import com.eventhub.order.repository.OrderEntity;
+import com.eventhub.ticket.api.TicketIssuanceApi;
+import com.eventhub.ticket.api.command.IssueTicketCommand;
+import com.eventhub.ticket.api.model.TicketView;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -36,16 +40,19 @@ public class OrderService implements ReservationApi, OrderQueryApi, OrderCommand
 
     private final PublicEventQueryApi publicEventQueryApi;
     private final InventoryReservationApi inventoryReservationApi;
+    private final TicketIssuanceApi ticketIssuanceApi;
     private final OrderMapper orderMapper;
     private final Clock clock;
 
     public OrderService(
             PublicEventQueryApi publicEventQueryApi,
             InventoryReservationApi inventoryReservationApi,
+            TicketIssuanceApi ticketIssuanceApi,
             OrderMapper orderMapper,
             Clock clock) {
         this.publicEventQueryApi = publicEventQueryApi;
         this.inventoryReservationApi = inventoryReservationApi;
+        this.ticketIssuanceApi = ticketIssuanceApi;
         this.orderMapper = orderMapper;
         this.clock = clock;
     }
@@ -86,7 +93,7 @@ public class OrderService implements ReservationApi, OrderQueryApi, OrderCommand
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public OrderView pay(long userId, long orderId) {
+    public PaymentResult pay(long userId, long orderId) {
         LocalDateTime paymentNow = currentUtcTime();
         OrderEntity current = requireOwnedOrder(userId, orderId);
         int affectedRows = orderMapper.markPaidIfWaitPayAndNotExpired(orderId, userId, paymentNow);
@@ -98,7 +105,12 @@ public class OrderService implements ReservationApi, OrderQueryApi, OrderCommand
         }
 
         inventoryReservationApi.confirmSoldOne(current.getSessionId());
-        return toView(requireOwnedOrder(userId, orderId));
+        OrderEntity paidOrder = requireOwnedOrder(userId, orderId);
+        TicketView ticket = ticketIssuanceApi.issueTicket(new IssueTicketCommand(
+                paidOrder.getId(),
+                paidOrder.getUserId(),
+                paidOrder.getSessionId()));
+        return new PaymentResult(toView(paidOrder), ticket);
     }
 
     @Override

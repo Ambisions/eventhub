@@ -243,22 +243,27 @@ class OrderTimeoutIntegrationTest {
         if (status.equals("PAID")) {
             assertThat(outcomes).containsExactlyInAnyOrder(Outcome.PAY_WON, Outcome.TIMEOUT_NOOP);
             assertThat(inventory(fixture.sessionId())).isEqualTo(new InventoryState(2, 1, 0, 1));
+            assertThat(ticketCountByOrder(fixture.orderId())).isEqualTo(1);
         } else {
             assertThat(outcomes).containsExactlyInAnyOrder(Outcome.ORDER_STATE_CONFLICT, Outcome.TIMEOUT_WON);
             assertThat(inventory(fixture.sessionId())).isEqualTo(new InventoryState(2, 2, 0, 0));
+            assertThat(ticketCountByOrder(fixture.orderId())).isZero();
         }
         assertInventoryInvariant(fixture.sessionId());
     }
 
     @AfterEach
     void cleanupAndVerifyNoSyntheticResidue() {
+        jdbcTemplate.update("DELETE t FROM ticket t JOIN ticket_order o ON o.id = t.order_id "
+                + "WHERE o.order_no LIKE ?", ORDER_PREFIX + "%");
+        assertThat(count("SELECT COUNT(*) FROM ticket t JOIN ticket_order o ON o.id = t.order_id "
+                + "WHERE o.order_no LIKE ?", ORDER_PREFIX + "%")).isZero();
         jdbcTemplate.update("DELETE FROM ticket_order WHERE order_no LIKE ?", ORDER_PREFIX + "%");
         jdbcTemplate.update("DELETE i FROM event_inventory i JOIN event_sessions s ON s.id = i.session_id "
                 + "WHERE s.name LIKE ?", TEST_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM event_sessions WHERE name LIKE ?", TEST_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM events WHERE title LIKE ?", TEST_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM users WHERE username LIKE ?", TEST_PREFIX + "%");
-
         assertThat(count("SELECT COUNT(*) FROM ticket_order WHERE order_no LIKE ?", ORDER_PREFIX + "%")).isZero();
         assertThat(count("SELECT COUNT(*) FROM event_inventory i JOIN event_sessions s ON s.id = i.session_id "
                 + "WHERE s.name LIKE ?", TEST_PREFIX + "%")).isZero();
@@ -354,6 +359,12 @@ class OrderTimeoutIntegrationTest {
     private String orderStatus(long orderId) {
         return jdbcTemplate.queryForObject(
                 "SELECT status FROM ticket_order WHERE id = ?", String.class, orderId);
+    }
+
+    private long ticketCountByOrder(long orderId) {
+        Long value = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ticket WHERE order_id = ?", Long.class, orderId);
+        return value == null ? 0 : value;
     }
 
     private InventoryState inventory(long sessionId) {

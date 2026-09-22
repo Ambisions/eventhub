@@ -8,6 +8,8 @@ import com.eventhub.inventory.api.error.InventoryErrorCode;
 import com.eventhub.inventory.api.error.InventoryException;
 import com.eventhub.order.api.error.OrderException;
 import com.eventhub.order.api.error.OrderErrorCode;
+import com.eventhub.ticket.api.error.TicketErrorCode;
+import com.eventhub.ticket.api.error.TicketException;
 import com.eventhub.user.api.error.UserErrorCode;
 import com.eventhub.user.api.error.UserException;
 import jakarta.validation.ConstraintViolationException;
@@ -64,6 +66,12 @@ public final class GlobalExceptionHandler {
                 exception.getErrorCode().getCode(), exception.getMessage()));
     }
 
+    @ExceptionHandler(TicketException.class)
+    public ResponseEntity<ApiErrorResponse> handleTicketException(TicketException exception) {
+        return ResponseEntity.status(statusFor(exception.getErrorCode())).body(new ApiErrorResponse(
+                exception.getErrorCode().getCode(), exception.getMessage()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidationException(MethodArgumentNotValidException exception) {
         return ResponseEntity.badRequest().body(
@@ -112,6 +120,14 @@ public final class GlobalExceptionHandler {
             case ORDER_NOT_FOUND -> HttpStatus.NOT_FOUND;
             case ACTIVE_PURCHASE_EXISTS, SALE_NOT_STARTED, SALE_ENDED,
                     ORDER_EXPIRED, ORDER_STATE_CONFLICT -> HttpStatus.CONFLICT;
+        };
+    }
+
+    private static HttpStatus statusFor(TicketErrorCode errorCode) {
+        return switch (errorCode) {
+            case TICKET_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case TICKET_ALREADY_ISSUED -> HttpStatus.CONFLICT;
+            case TICKET_ISSUANCE_FAILED -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
     }
 }

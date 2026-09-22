@@ -7,6 +7,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -25,6 +26,7 @@ import com.eventhub.order.api.OrderQueryApi;
 import com.eventhub.order.api.error.OrderErrorCode;
 import com.eventhub.order.api.error.OrderException;
 import com.eventhub.order.api.model.OrderStatus;
+import com.eventhub.ticket.api.model.TicketStatus;
 import com.eventhub.user.api.model.UserProfile;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -81,13 +83,22 @@ class OrderLifecycleIntegrationTest {
 
         var paid = orderCommandApi.pay(userId, orderId);
 
-        assertThat(paid.status()).isEqualTo(OrderStatus.PAID);
+        assertThat(paid.order().status()).isEqualTo(OrderStatus.PAID);
+        assertThat(paid.ticket().orderId()).isEqualTo(orderId);
+        assertThat(paid.ticket().sessionId()).isEqualTo(fixture.sessionId());
+        assertThat(paid.ticket().status()).isEqualTo(TicketStatus.VALID);
+        TicketState ticket = ticketByOrder(orderId);
+        assertThat(ticket.ticketNo()).isEqualTo(paid.ticket().ticketNo());
+        assertThat(ticket.userId()).isEqualTo(userId);
+        assertThat(ticket.sessionId()).isEqualTo(fixture.sessionId());
+        assertThat(ticket.status()).isEqualTo("VALID");
         assertThat(orderQueryApi.getOrder(userId, orderId).status()).isEqualTo(OrderStatus.PAID);
         assertThat(inventory(fixture.sessionId())).isEqualTo(new InventoryState(3, 2, 0, 1));
         assertInventoryInvariant(fixture.sessionId());
 
         assertOrderError(() -> orderCommandApi.pay(userId, orderId), OrderErrorCode.ORDER_STATE_CONFLICT);
         assertThat(inventory(fixture.sessionId())).isEqualTo(new InventoryState(3, 2, 0, 1));
+        assertThat(ticketCountByOrder(orderId)).isEqualTo(1);
     }
 
     @Test
@@ -104,7 +115,10 @@ class OrderLifecycleIntegrationTest {
 
         var paid = orderCommandApi.pay(userId, orderId);
 
-        assertThat(paid.status()).isEqualTo(OrderStatus.PAID);
+        assertThat(paid.order().status()).isEqualTo(OrderStatus.PAID);
+        assertThat(paid.ticket().orderId()).isEqualTo(orderId);
+        assertThat(paid.ticket().sessionId()).isEqualTo(fixture.sessionId());
+        assertThat(ticketCountByOrder(orderId)).isEqualTo(1);
         assertThat(orderStatus(orderId)).isEqualTo("PAID");
         assertThat(inventory(fixture.sessionId())).isEqualTo(new InventoryState(2, 1, 0, 1));
         assertInventoryInvariant(fixture.sessionId());
@@ -154,6 +168,7 @@ class OrderLifecycleIntegrationTest {
         assertInventoryConflict(() -> orderCommandApi.pay(payUser, payOrder));
         assertThat(orderStatus(payOrder)).isEqualTo("WAIT_PAY");
         assertThat(inventory(payFixture.sessionId())).isEqualTo(new InventoryState(1, 1, 0, 0));
+        assertThat(ticketCountByOrder(payOrder)).isZero();
 
         long cancelUser = createUser("cancel-rollback-user");
         Fixture cancelFixture = createFixture("cancel-rollback", new InventoryState(1, 1, 0, 0));
@@ -186,6 +201,7 @@ class OrderLifecycleIntegrationTest {
             assertOrderError(() -> orderCommandApi.pay(userId, orderId), OrderErrorCode.ORDER_STATE_CONFLICT);
             assertOrderError(() -> orderCommandApi.cancel(userId, orderId), OrderErrorCode.ORDER_STATE_CONFLICT);
             assertThat(inventory(fixture.sessionId())).isEqualTo(state);
+            assertThat(ticketCountByOrder(orderId)).isZero();
         }
     }
 
@@ -220,7 +236,14 @@ class OrderLifecycleIntegrationTest {
                         .header("X-User-Id", Long.toString(other.profile().getId()))
                         .queryParam("userId", Long.toString(other.profile().getId())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("PAID"));
+                .andExpect(jsonPath("$.order.status").value("PAID"))
+                .andExpect(jsonPath("$.order.userId").doesNotExist())
+                .andExpect(jsonPath("$.ticket.ticketNo").exists())
+                .andExpect(jsonPath("$.ticket.orderId").value(payOrder))
+                .andExpect(jsonPath("$.ticket.sessionId").value(payFixture.sessionId()))
+                .andExpect(jsonPath("$.ticket.status").value("VALID"))
+                .andExpect(jsonPath("$.ticket.id").doesNotExist())
+                .andExpect(jsonPath("$.ticket.userId").doesNotExist());
         mockMvc.perform(post("/api/orders/{id}/pay", payOrder).header("Authorization", bearer(owner)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ORDER_STATE_CONFLICT"));
@@ -238,6 +261,21 @@ class OrderLifecycleIntegrationTest {
         mockMvc.perform(post("/api/orders/{id}/pay", expiredOrder).header("Authorization", bearer(owner)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ORDER_EXPIRED"));
+
+        Fixture duplicateTicketFixture = createFixture(
+                "http-duplicate-ticket", new InventoryState(1, 0, 1, 0));
+        long duplicateTicketOrder = insertOrder(
+                owner.profile().getId(), duplicateTicketFixture.sessionId(),
+                "WAIT_PAY", PAYMENT_NOW.plusMinutes(5));
+        insertTicket(duplicateTicketOrder, owner.profile().getId(), duplicateTicketFixture.sessionId());
+        mockMvc.perform(post("/api/orders/{id}/pay", duplicateTicketOrder)
+                        .header("Authorization", bearer(owner)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("TICKET_ALREADY_ISSUED"));
+        assertThat(orderStatus(duplicateTicketOrder)).isEqualTo("WAIT_PAY");
+        assertThat(inventory(duplicateTicketFixture.sessionId()))
+                .isEqualTo(new InventoryState(1, 0, 1, 0));
+        assertThat(ticketCountByOrder(duplicateTicketOrder)).isEqualTo(1);
 
         mockMvc.perform(get("/api/sessions/{id}", payFixture.sessionId())).andExpect(status().isOk());
         Fixture reservationFixture = createFixture("http-reservation", new InventoryState(1, 1, 0, 0));
@@ -275,9 +313,51 @@ class OrderLifecycleIntegrationTest {
             assertThat(finalStatus).isIn("PAID", "CANCELLED");
             if (finalStatus.equals("PAID")) {
                 assertThat(finalInventory).isEqualTo(new InventoryState(2, 1, 0, 1));
+                assertThat(ticketCountByOrder(orderId)).isEqualTo(1);
             } else {
                 assertThat(finalInventory).isEqualTo(new InventoryState(2, 2, 0, 0));
+                assertThat(ticketCountByOrder(orderId)).isZero();
             }
+            assertInventoryInvariant(fixture.sessionId());
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void concurrentPayHasOneWinnerOneTicketAndOneInventoryTransition() throws Exception {
+        long userId = createUser("pay-race-user");
+        Fixture fixture = createFixture("pay-race", new InventoryState(2, 1, 1, 0));
+        long orderId = insertOrder(userId, fixture.sessionId(), "WAIT_PAY", PAYMENT_NOW.plusMinutes(5));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        List<Future<Outcome>> futures = new ArrayList<>();
+        try {
+            futures.add(executor.submit(() -> runContender(
+                    ready, start, () -> orderCommandApi.pay(userId, orderId))));
+            futures.add(executor.submit(() -> runContender(
+                    ready, start, () -> orderCommandApi.pay(userId, orderId))));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            executor.shutdown();
+            assertThat(executor.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
+
+            List<Outcome> outcomes = new ArrayList<>();
+            for (Future<Outcome> future : futures) {
+                outcomes.add(future.get(1, TimeUnit.SECONDS));
+            }
+            assertThat(outcomes).filteredOn(outcome -> outcome == Outcome.SUCCESS).hasSize(1);
+            assertThat(outcomes).filteredOn(outcome -> outcome == Outcome.STATE_CONFLICT).hasSize(1);
+            assertThat(orderStatus(orderId)).isEqualTo("PAID");
+            assertThat(inventory(fixture.sessionId())).isEqualTo(new InventoryState(2, 1, 0, 1));
+            assertThat(ticketCountByOrder(orderId)).isEqualTo(1);
+            TicketState ticket = ticketByOrder(orderId);
+            assertThat(ticket.userId()).isEqualTo(userId);
+            assertThat(ticket.sessionId()).isEqualTo(fixture.sessionId());
+            assertThat(ticket.status()).isEqualTo("VALID");
             assertInventoryInvariant(fixture.sessionId());
         } finally {
             start.countDown();
@@ -288,6 +368,8 @@ class OrderLifecycleIntegrationTest {
 
     @AfterEach
     void cleanupAndVerifyNoSyntheticResidue() {
+        jdbcTemplate.update("DELETE t FROM ticket t JOIN event_sessions s ON s.id = t.session_id "
+                + "WHERE s.name LIKE ?", TEST_PREFIX + "%");
         jdbcTemplate.update("DELETE o FROM ticket_order o JOIN event_sessions s ON s.id = o.session_id "
                 + "WHERE s.name LIKE ?", TEST_PREFIX + "%");
         jdbcTemplate.update("DELETE i FROM event_inventory i JOIN event_sessions s ON s.id = i.session_id "
@@ -296,6 +378,8 @@ class OrderLifecycleIntegrationTest {
         jdbcTemplate.update("DELETE FROM events WHERE title LIKE ?", TEST_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM users WHERE username LIKE ?", TEST_PREFIX + "%");
 
+        assertThat(count("SELECT COUNT(*) FROM ticket t JOIN event_sessions s ON s.id = t.session_id "
+                + "WHERE s.name LIKE ?", TEST_PREFIX + "%")).isZero();
         assertThat(count("SELECT COUNT(*) FROM ticket_order o JOIN event_sessions s ON s.id = o.session_id "
                 + "WHERE s.name LIKE ?", TEST_PREFIX + "%")).isZero();
         assertThat(count("SELECT COUNT(*) FROM event_inventory i JOIN event_sessions s ON s.id = i.session_id "
@@ -367,6 +451,13 @@ class OrderLifecycleIntegrationTest {
                 "SELECT id FROM ticket_order WHERE order_no = ?", Long.class, orderNo);
     }
 
+    private void insertTicket(long orderId, long userId, long sessionId) {
+        String ticketNo = "TKT-" + UUID.randomUUID().toString().replace("-", "").toUpperCase(Locale.ROOT);
+        jdbcTemplate.update("INSERT INTO ticket (ticket_no, order_id, user_id, session_id, status) "
+                        + "VALUES (?, ?, ?, ?, 'VALID')",
+                ticketNo, orderId, userId, sessionId);
+    }
+
     private InventoryState inventory(long sessionId) {
         return jdbcTemplate.queryForObject(
                 "SELECT total_stock, available_stock, locked_stock, sold_stock "
@@ -389,6 +480,23 @@ class OrderLifecycleIntegrationTest {
 
     private String orderStatus(long orderId) {
         return jdbcTemplate.queryForObject("SELECT status FROM ticket_order WHERE id = ?", String.class, orderId);
+    }
+
+    private TicketState ticketByOrder(long orderId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT ticket_no, user_id, session_id, status FROM ticket WHERE order_id = ?",
+                (resultSet, rowNum) -> new TicketState(
+                        resultSet.getString("ticket_no"),
+                        resultSet.getLong("user_id"),
+                        resultSet.getLong("session_id"),
+                        resultSet.getString("status")),
+                orderId);
+    }
+
+    private long ticketCountByOrder(long orderId) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ticket WHERE order_id = ?", Long.class, orderId);
+        return count == null ? 0 : count;
     }
 
     private long count(String sql, Object value) {
@@ -434,6 +542,9 @@ class OrderLifecycleIntegrationTest {
     }
 
     private record InventoryState(int total, int available, int locked, int sold) {
+    }
+
+    private record TicketState(String ticketNo, long userId, long sessionId, String status) {
     }
 
     @TestConfiguration(proxyBeanMethods = false)

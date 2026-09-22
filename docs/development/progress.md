@@ -584,4 +584,51 @@ Status: `COMPLETE`
   Timeout MQ mechanism, WaitingList implementation, Notification topology, exact Outbox Schema,
   and exact MQ idempotency Key remain unfrozen or Planned as applicable.
 - No Production Code, Test, POM, Migration, Docker, or runtime configuration was changed.
-  Phase 6 remains `IN PROGRESS`; Batch 5 has not started.
+  Current factual status: Phase 6 is `COMPLETE / VERIFIED / FROZEN` (see Batch 5 above).
+
+## Phase 7 — Ticket Foundation
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+### Batch 1 — Ticket Contract Freeze
+
+Status: `COMPLETE / FROZEN`
+
+### Batch 2 — Ticket Persistence Foundation
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+- Established Ticket public APIs, MyBatis persistence, V1 uniqueness and status guards,
+  `MANDATORY` issuance transaction participation, and owner-scoped query capability.
+
+### Batch 3 — Payment-to-Ticket Integration
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+- Pay now issues one VALID Ticket synchronously after Order and Inventory writes in the
+  same Order-owned Local MySQL Transaction; success returns `PaymentResult(OrderView, TicketView)`.
+
+### Batch 4 — Owner-only Ticket Query
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+- Added authenticated `GET /api/tickets/{ticketNo}` with owner-only visibility and
+  identical 404 handling for missing, invalid, and other-owner ticket numbers.
+
+### Batch 5 — Integrated Verification / Final Freeze
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+- Fresh isolated Compose project `eventhub-phase7-batch5-20260922-01` started MySQL
+  8.4.11 with zero pre-migration business tables. Flyway V1 then V2 succeeded;
+  history remained two successful migrations with zero failures, and a second run
+  reported the schema up to date.
+- Phase 6/7 targeted verification passed 50 tests with zero failures, errors, or
+  skips. The final Root + 9 Module `clean verify` passed 42 suites / 175 tests
+  with zero failures, errors, or skips; Spring Boot repackage succeeded.
+- Ticket constraint, concurrency, three-table atomicity, owner-only Web/Security,
+  Phase 6 regression, and independent synthetic-data/invariant residue audits passed.
+  Formal Reviewer and Phase-level Test Reviewer both passed with no blocking gap.
+- Windows host note: a host-specific Maven Wrapper path issue required a temporary
+  user-TEMP junction to the existing Maven home for verification. It was removed;
+  the safety recheck found no persistent repository, PATH, environment, or `.m2` side effects.

@@ -8,7 +8,8 @@ import org.springframework.context.annotation.Configuration;
         "com.eventhub.user.mapper",
         "com.eventhub.event.mapper",
         "com.eventhub.inventory.mapper",
-        "com.eventhub.order.mapper"
+        "com.eventhub.order.mapper",
+        "com.eventhub.ticket.mapper"
 })
 public class MybatisConfiguration {
 }
