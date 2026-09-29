@@ -8,6 +8,10 @@ import org.apache.ibatis.annotations.Param;
 
 public interface EventSessionMapper extends BaseMapper<EventSessionEntity> {
 
+    EventSessionEntity selectOwnedCheckInSession(
+            @Param("organizerUserId") long organizerUserId,
+            @Param("sessionId") long sessionId);
+
     List<EventSessionEntity> selectPublishedByEventId(@Param("eventId") long eventId);
 
     EventSessionEntity selectPublishedById(@Param("sessionId") long sessionId);

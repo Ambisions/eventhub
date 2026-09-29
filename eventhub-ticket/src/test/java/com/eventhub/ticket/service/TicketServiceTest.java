@@ -6,6 +6,10 @@ import java.time.LocalDateTime;
 import com.eventhub.ticket.api.command.IssueTicketCommand;
 import com.eventhub.ticket.api.error.TicketErrorCode;
 import com.eventhub.ticket.api.error.TicketException;
+import com.eventhub.ticket.api.error.TicketCheckInException;
+import com.eventhub.ticket.api.error.TicketCheckInFailure;
+import com.eventhub.ticket.api.model.TicketCheckInResult;
+import com.eventhub.ticket.api.model.TicketCheckInTarget;
 import com.eventhub.ticket.api.model.TicketStatus;
 import com.eventhub.ticket.api.model.TicketView;
 import com.eventhub.ticket.domain.TicketNumberGenerator;
@@ -122,6 +126,72 @@ class TicketServiceTest {
         verify(ticketMapper, never()).selectById(any());
     }
 
+    @Test
+    void invalidCheckInTicketNumberIsHiddenWithoutMapperAccess() {
+        assertCheckInFailure(() -> ticketService.resolveTarget("invalid"), TicketCheckInFailure.NOT_FOUND);
+        assertCheckInFailure(() -> ticketService.checkIn(null, 1L), TicketCheckInFailure.NOT_FOUND);
+
+        verifyNoInteractions(ticketMapper);
+    }
+
+    @Test
+    void resolvesMinimalCheckInTarget() {
+        TicketEntity ticket = ticket(41L, 11L, 12L, 13L, TicketStatus.VALID, LocalDateTime.now());
+        when(ticketMapper.selectCheckInTarget(TICKET_NO)).thenReturn(ticket);
+
+        TicketCheckInTarget target = ticketService.resolveTarget(TICKET_NO);
+
+        assertEquals(TICKET_NO, target.ticketNo());
+        assertEquals(13L, target.sessionId());
+    }
+
+    @Test
+    void missingCheckInTargetIsHidden() {
+        when(ticketMapper.selectCheckInTarget(TICKET_NO)).thenReturn(null);
+
+        assertCheckInFailure(() -> ticketService.resolveTarget(TICKET_NO), TicketCheckInFailure.NOT_FOUND);
+    }
+
+    @Test
+    void successfulConditionalUpdateReturnsUsedResult() {
+        when(ticketMapper.markUsedIfValid(TICKET_NO, 13L)).thenReturn(1);
+
+        TicketCheckInResult result = ticketService.checkIn(TICKET_NO, 13L);
+
+        assertEquals(TICKET_NO, result.ticketNo());
+        assertEquals(13L, result.sessionId());
+        assertEquals(TicketStatus.USED, result.status());
+        verify(ticketMapper, never()).selectCheckInState(any(), any(Long.class));
+    }
+
+    @Test
+    void zeroRowUpdateClassifiesUsedTicketAsAlreadyUsed() {
+        TicketEntity used = ticket(41L, 11L, 12L, 13L, TicketStatus.USED, LocalDateTime.now());
+        when(ticketMapper.markUsedIfValid(TICKET_NO, 13L)).thenReturn(0);
+        when(ticketMapper.selectCheckInState(TICKET_NO, 13L)).thenReturn(used);
+
+        assertCheckInFailure(() -> ticketService.checkIn(TICKET_NO, 13L),
+                TicketCheckInFailure.ALREADY_USED);
+    }
+
+    @Test
+    void zeroRowUpdateClassifiesWrongSessionOrMissingTicketAsNotFound() {
+        when(ticketMapper.markUsedIfValid(TICKET_NO, 99L)).thenReturn(0);
+        when(ticketMapper.selectCheckInState(TICKET_NO, 99L)).thenReturn(null);
+
+        assertCheckInFailure(() -> ticketService.checkIn(TICKET_NO, 99L),
+                TicketCheckInFailure.NOT_FOUND);
+    }
+
+    @Test
+    void zeroRowUpdateDoesNotMisclassifyRemainingValidTicket() {
+        TicketEntity valid = ticket(41L, 11L, 12L, 13L, TicketStatus.VALID, LocalDateTime.now());
+        when(ticketMapper.markUsedIfValid(TICKET_NO, 13L)).thenReturn(0);
+        when(ticketMapper.selectCheckInState(TICKET_NO, 13L)).thenReturn(valid);
+
+        assertThrows(IllegalStateException.class, () -> ticketService.checkIn(TICKET_NO, 13L));
+    }
+
     private void assertDuplicateClassification(String constraint, TicketErrorCode expected) {
         when(ticketNumberGenerator.generate()).thenReturn(TICKET_NO);
         doThrow(duplicate(constraint)).when(ticketMapper).insert(any(TicketEntity.class));
@@ -142,6 +212,11 @@ class TicketServiceTest {
     private static void assertTicketNotFound(Runnable invocation) {
         TicketException exception = assertThrows(TicketException.class, invocation::run);
         assertEquals(TicketErrorCode.TICKET_NOT_FOUND, exception.getErrorCode());
+    }
+
+    private static void assertCheckInFailure(Runnable invocation, TicketCheckInFailure expected) {
+        TicketCheckInException exception = assertThrows(TicketCheckInException.class, invocation::run);
+        assertEquals(expected, exception.getFailure());
     }
 
     private static TicketEntity ticket(

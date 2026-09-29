@@ -1,5 +1,7 @@
 package com.eventhub.handler;
 
+import com.eventhub.application.checkin.error.CheckInErrorCode;
+import com.eventhub.application.checkin.error.CheckInException;
 import com.eventhub.auth.api.error.AuthErrorCode;
 import com.eventhub.auth.api.error.AuthException;
 import com.eventhub.event.api.error.EventErrorCode;
@@ -72,6 +74,12 @@ public final class GlobalExceptionHandler {
                 exception.getErrorCode().getCode(), exception.getMessage()));
     }
 
+    @ExceptionHandler(CheckInException.class)
+    public ResponseEntity<ApiErrorResponse> handleCheckInException(CheckInException exception) {
+        return ResponseEntity.status(statusFor(exception.getErrorCode())).body(new ApiErrorResponse(
+                exception.getErrorCode().getCode(), exception.getMessage()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidationException(MethodArgumentNotValidException exception) {
         return ResponseEntity.badRequest().body(
@@ -128,6 +136,14 @@ public final class GlobalExceptionHandler {
             case TICKET_NOT_FOUND -> HttpStatus.NOT_FOUND;
             case TICKET_ALREADY_ISSUED -> HttpStatus.CONFLICT;
             case TICKET_ISSUANCE_FAILED -> HttpStatus.INTERNAL_SERVER_ERROR;
+        };
+    }
+
+    private static HttpStatus statusFor(CheckInErrorCode errorCode) {
+        return switch (errorCode) {
+            case TICKET_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case TICKET_CHECK_IN_NOT_STARTED, TICKET_CHECK_IN_CLOSED, TICKET_ALREADY_USED ->
+                    HttpStatus.CONFLICT;
         };
     }
 }

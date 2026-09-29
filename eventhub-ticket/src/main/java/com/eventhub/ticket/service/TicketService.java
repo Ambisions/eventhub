@@ -7,10 +7,16 @@ import java.util.regex.Pattern;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.eventhub.ticket.api.TicketIssuanceApi;
+import com.eventhub.ticket.api.TicketCheckInCommandApi;
+import com.eventhub.ticket.api.TicketCheckInQueryApi;
 import com.eventhub.ticket.api.TicketQueryApi;
 import com.eventhub.ticket.api.command.IssueTicketCommand;
 import com.eventhub.ticket.api.error.TicketErrorCode;
 import com.eventhub.ticket.api.error.TicketException;
+import com.eventhub.ticket.api.error.TicketCheckInException;
+import com.eventhub.ticket.api.error.TicketCheckInFailure;
+import com.eventhub.ticket.api.model.TicketCheckInResult;
+import com.eventhub.ticket.api.model.TicketCheckInTarget;
 import com.eventhub.ticket.api.model.TicketStatus;
 import com.eventhub.ticket.api.model.TicketView;
 import com.eventhub.ticket.domain.TicketNumberGenerator;
@@ -22,7 +28,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public class TicketService implements TicketIssuanceApi, TicketQueryApi {
+public class TicketService implements TicketIssuanceApi, TicketQueryApi,
+        TicketCheckInQueryApi, TicketCheckInCommandApi {
 
     private static final int MYSQL_DUPLICATE_KEY_ERROR_CODE = 1062;
     private static final String SQL_STATE_INTEGRITY_CONSTRAINT_VIOLATION = "23000";
@@ -74,6 +81,42 @@ public class TicketService implements TicketIssuanceApi, TicketQueryApi {
         return toView(ticket);
     }
 
+    @Override
+    public TicketCheckInTarget resolveTarget(String ticketNo) {
+        validateCheckInTicketNumber(ticketNo);
+        TicketEntity ticket = ticketMapper.selectCheckInTarget(ticketNo);
+        if (ticket == null) {
+            throw checkInNotFound();
+        }
+        return new TicketCheckInTarget(ticket.getTicketNo(), ticket.getSessionId());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public TicketCheckInResult checkIn(String ticketNo, long sessionId) {
+        validateCheckInTicketNumber(ticketNo);
+        if (sessionId <= 0) {
+            throw checkInNotFound();
+        }
+
+        int affectedRows = ticketMapper.markUsedIfValid(ticketNo, sessionId);
+        if (affectedRows == 1) {
+            return new TicketCheckInResult(ticketNo, sessionId, TicketStatus.USED);
+        }
+        if (affectedRows != 0) {
+            throw new IllegalStateException("Ticket check-in affected an unexpected number of rows");
+        }
+
+        TicketEntity current = ticketMapper.selectCheckInState(ticketNo, sessionId);
+        if (current == null) {
+            throw checkInNotFound();
+        }
+        if (current.getStatus() == TicketStatus.USED) {
+            throw new TicketCheckInException(TicketCheckInFailure.ALREADY_USED);
+        }
+        throw new IllegalStateException("Ticket remained VALID after a zero-row check-in update");
+    }
+
     private void insertTicket(TicketEntity ticket) {
         try {
             int affectedRows = ticketMapper.insert(ticket);
@@ -104,6 +147,16 @@ public class TicketService implements TicketIssuanceApi, TicketQueryApi {
         if (command.sessionId() <= 0) {
             throw new IllegalArgumentException("sessionId must be positive");
         }
+    }
+
+    private static void validateCheckInTicketNumber(String ticketNo) {
+        if (ticketNo == null || !TICKET_NUMBER_PATTERN.matcher(ticketNo).matches()) {
+            throw checkInNotFound();
+        }
+    }
+
+    private static TicketCheckInException checkInNotFound() {
+        return new TicketCheckInException(TicketCheckInFailure.NOT_FOUND);
     }
 
     private static String duplicateConstraint(Throwable exception) {

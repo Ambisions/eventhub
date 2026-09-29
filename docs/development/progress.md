@@ -632,3 +632,40 @@ Status: `COMPLETE / VERIFIED / FROZEN`
 - Windows host note: a host-specific Maven Wrapper path issue required a temporary
   user-TEMP junction to the existing Maven home for verification. It was removed;
   the safety recheck found no persistent repository, PATH, environment, or `.m2` side effects.
+
+## Phase 8 — Ticket Check-in
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+### Batch 1 — Check-in Contract Freeze
+
+Status: `COMPLETE / FROZEN`
+
+### Batch 2 — Event Authorization + Ticket State Foundation
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+### Batch 3 — App Orchestration + HTTP/Security Integration
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+### Batch 4 — Integrated Verification / Final Freeze
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+- Fresh isolated Compose project `eventhub-phase8-batch4-20260930b` started MySQL
+  8.4.11 from zero business tables. Flyway V1 then V2 succeeded; history remained
+  two successful migrations with zero failures, and subsequent starts reported the
+  schema up to date.
+- Phase 8 and Phase 6/7 targeted verification passed 13 suites / 61 tests with zero
+  failures, errors, or skips. The final Root + 9 Module `clean verify` passed
+  46 suites / 206 tests with zero failures, errors, or skips; Spring Boot repackage
+  succeeded.
+- Fresh evidence proved Event-owner authorization without ADMIN bypass, the
+  `startAt <= checkInTime < endAt` window, Ticket `MANDATORY` participation in the
+  App-owned `READ_COMMITTED` transaction, session-bound conditional `VALID -> USED`,
+  one-winner same-ticket concurrency, real JWT/Web security, resource hiding, and
+  the frozen error priority.
+- Independent residue checks found all six business tables empty, zero invalid Ticket
+  state, zero EventHub Redis keys, and zero RabbitMQ application topology/connections.
+  Formal Reviewer and Phase-level Test Reviewer both passed with no blocking gap.

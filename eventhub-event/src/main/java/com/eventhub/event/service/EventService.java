@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Objects;
 
 import com.eventhub.event.api.AdminEventReviewApi;
+import com.eventhub.event.api.EventCheckInAuthorizationApi;
 import com.eventhub.event.api.OrganizerEventApi;
 import com.eventhub.event.api.OrganizerEventSessionGuardApi;
 import com.eventhub.event.api.PublicEventQueryApi;
@@ -15,6 +16,8 @@ import com.eventhub.event.api.command.UpdateEventCommand;
 import com.eventhub.event.api.command.UpdateEventSessionCommand;
 import com.eventhub.event.api.error.EventErrorCode;
 import com.eventhub.event.api.error.EventException;
+import com.eventhub.event.api.error.EventCheckInAuthorizationException;
+import com.eventhub.event.api.error.EventCheckInAuthorizationFailure;
 import com.eventhub.event.api.model.EventSessionView;
 import com.eventhub.event.api.model.EditableEventSessionContext;
 import com.eventhub.event.api.model.EventStatus;
@@ -23,6 +26,7 @@ import com.eventhub.event.api.model.PublicEventView;
 import com.eventhub.event.api.model.PublishedEventPage;
 import com.eventhub.event.api.model.ReviewEventView;
 import com.eventhub.event.domain.EventInputPolicy;
+import com.eventhub.event.domain.EventCheckInPolicy;
 import com.eventhub.event.domain.EventSessionInputPolicy;
 import com.eventhub.event.domain.EventStatePolicy;
 import com.eventhub.event.mapper.EventMapper;
@@ -35,7 +39,7 @@ import org.springframework.transaction.annotation.Propagation;
 
 @Service
 public class EventService implements PublicEventQueryApi, OrganizerEventApi, AdminEventReviewApi,
-        OrganizerEventSessionGuardApi {
+        OrganizerEventSessionGuardApi, EventCheckInAuthorizationApi {
 
     private static final int MAX_PAGE_SIZE = 100;
 
@@ -92,6 +96,21 @@ public class EventService implements PublicEventQueryApi, OrganizerEventApi, Adm
             throw new EventException(EventErrorCode.SESSION_NOT_FOUND);
         }
         return toSessionView(session);
+    }
+
+    @Override
+    public void requireCheckInEligibility(
+            long organizerUserId,
+            long sessionId,
+            java.time.LocalDateTime checkInTime) {
+        if (organizerUserId <= 0 || sessionId <= 0) {
+            throw checkInNotFound();
+        }
+        EventSessionEntity session = eventSessionMapper.selectOwnedCheckInSession(organizerUserId, sessionId);
+        if (session == null) {
+            throw checkInNotFound();
+        }
+        EventCheckInPolicy.requireEligible(checkInTime, session.getStartAt(), session.getEndAt());
     }
 
     @Override
@@ -340,6 +359,11 @@ public class EventService implements PublicEventQueryApi, OrganizerEventApi, Adm
         if (sessionId <= 0) {
             throw new EventException(EventErrorCode.SESSION_NOT_FOUND);
         }
+    }
+
+    private static EventCheckInAuthorizationException checkInNotFound() {
+        return new EventCheckInAuthorizationException(
+                EventCheckInAuthorizationFailure.NOT_FOUND_OR_NOT_OWNER);
     }
 
     private static PublicEventView toPublicView(EventEntity event) {

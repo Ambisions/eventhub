@@ -1,10 +1,13 @@
 package com.eventhub.event.service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import com.eventhub.event.api.command.UpdateEventCommand;
 import com.eventhub.event.api.error.EventErrorCode;
 import com.eventhub.event.api.error.EventException;
+import com.eventhub.event.api.error.EventCheckInAuthorizationException;
+import com.eventhub.event.api.error.EventCheckInAuthorizationFailure;
 import com.eventhub.event.api.model.EventStatus;
 import com.eventhub.event.api.model.EditableEventSessionContext;
 import com.eventhub.event.api.model.ManagedEventView;
@@ -21,6 +24,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -113,6 +117,35 @@ class EventServiceTest {
         EventException nonEditable = assertThrows(EventException.class,
                 () -> eventService.requireEditableOwnedSession(OWNER_ID, 30L));
         assertEquals(EventErrorCode.EVENT_NOT_EDITABLE, nonEditable.getErrorCode());
+    }
+
+    @Test
+    void authorizesOwnedSessionUsingSingleOwnershipLookupAndTimePolicy() {
+        LocalDateTime start = LocalDateTime.of(2030, 6, 1, 10, 0);
+        EventSessionEntity session = new EventSessionEntity();
+        session.setId(30L);
+        session.setEventId(EVENT_ID);
+        session.setStartAt(start);
+        session.setEndAt(start.plusHours(2));
+        when(eventSessionMapper.selectOwnedCheckInSession(OWNER_ID, 30L)).thenReturn(session);
+
+        eventService.requireCheckInEligibility(OWNER_ID, 30L, start);
+
+        verify(eventSessionMapper).selectOwnedCheckInSession(OWNER_ID, 30L);
+        verifyNoInteractions(eventMapper);
+    }
+
+    @Test
+    void hidesMissingSessionAndNonOwnershipBehindOneFailure() {
+        LocalDateTime checkInTime = LocalDateTime.of(2030, 6, 1, 10, 0);
+        when(eventSessionMapper.selectOwnedCheckInSession(OWNER_ID, 30L)).thenReturn(null);
+
+        EventCheckInAuthorizationException exception = assertThrows(
+                EventCheckInAuthorizationException.class,
+                () -> eventService.requireCheckInEligibility(OWNER_ID, 30L, checkInTime));
+
+        assertEquals(EventCheckInAuthorizationFailure.NOT_FOUND_OR_NOT_OWNER, exception.getFailure());
+        verify(eventSessionMapper).selectOwnedCheckInSession(OWNER_ID, 30L);
     }
 
     private static EventEntity event(long ownerId, EventStatus status, String title, String description) {

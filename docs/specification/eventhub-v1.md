@@ -607,8 +607,8 @@ Not Yet Frozen：Refund owner/API、Reservation persistence model、exact MQ con
 ## eventhub-ticket
 
 ```text
-Current Frozen / Implemented：PAID 同步签发 Ticket、Owner-only 单票查询
-Future：Ticket 列表与核销尚未实现
+Current Frozen / Implemented：PAID 同步签发 Ticket、Owner-only 单票查询、Event Owner 核销
+Future：Ticket 列表尚未实现
 Not Yet Frozen：refund Ticket state/失效方式
 
 ```
@@ -1653,6 +1653,7 @@ Order 列表、退款与支付提供方集成仍属于后续 Batch；Ticket 同�
 
 ```http
 GET /api/tickets/{ticketNo}
+POST /api/tickets/{ticketNo}/check-in
 
 ```
 
@@ -1666,9 +1667,25 @@ Ticket 签发以数据库 `UNIQUE(ticket_no)`、`UNIQUE(order_id)` 和
 `UNIQUE(user_id, session_id)` 为最终安全线。重复 Order 或 User/Session 出票
 返回 `TICKET_ALREADY_ISSUED`，并回滚整个 Pay 事务；不返回已有 Ticket。
 
-Ticket 列表与 `VALID -> USED` 核销尚未实现。`GET /api/tickets`、
-`POST /api/tickets/{ticketNo}/verify` 仅为未来路径示例，精确路径和授权规则
-尚未冻结。
+`POST /api/tickets/{ticketNo}/check-in` 要求认证，且只有 Ticket Session 所属
+Event 的 Organizer Owner 可以核销；ADMIN 不获得 Ownership bypass，但 ADMIN
+同时为该 Event Owner 时可以正常核销。缺失 Ticket、非法 `ticketNo` 或非 Owner
+统一返回 `TICKET_NOT_FOUND` / HTTP 404，避免暴露资源存在性。
+
+核销窗口严格为 `sessionStartAt <= checkInTime < sessionEndAt`：开始前返回
+`TICKET_CHECK_IN_NOT_STARTED`，结束时刻及之后返回 `TICKET_CHECK_IN_CLOSED`。
+App 层 `CheckInApplicationService` 捕获一次 UTC 微秒时间并持有
+`READ_COMMITTED` 本地事务，依次解析 Ticket target、执行 Event Owner/时间授权，
+再调用 `MANDATORY` Ticket mutation。Ticket 通过 Session-bound Conditional UPDATE
+执行唯一状态转换 `VALID -> USED`；合法窗口内重复核销返回
+`TICKET_ALREADY_USED`。
+
+错误优先级为 Resource/Ownership hiding、Time Window、Conditional UPDATE、USED
+classification。因此 non-owner 即使 Ticket 已 USED 或窗口已关闭仍返回 404；Owner
+的 USED Ticket 在关闭窗口返回 `TICKET_CHECK_IN_CLOSED`，在合法窗口返回
+`TICKET_ALREADY_USED`。成功响应为 HTTP 200，且仅包含 `ticketNo`、`sessionId`、
+`status`。Ticket 列表 `GET /api/tickets` 仍属于 Future；退款 Ticket state、失效方式
+以及 Refund 与 Check-in 的交互仍未冻结。
 
 ---
 

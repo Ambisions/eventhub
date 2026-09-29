@@ -22,6 +22,14 @@
         s.start_at, s.end_at, s.created_at, s.updated_at
     </sql>
 
+    <select id="selectOwnedCheckInSession" resultMap="eventSessionEntityResultMap">
+        SELECT <include refid="sessionColumns"/>
+        FROM event_sessions s
+        INNER JOIN events e ON e.id = s.event_id
+        WHERE s.id = #{sessionId}
+          AND e.organizer_user_id = #{organizerUserId}
+    </select>
+
     <select id="selectPublishedByEventId" resultMap="eventSessionEntityResultMap">
         SELECT <include refid="sessionColumns"/>
         FROM event_sessions s

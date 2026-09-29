@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.eventhub.ticket.mapper.TicketMapper">
+
+    <resultMap id="ticketEntityResultMap" type="com.eventhub.ticket.repository.TicketEntity">
+        <id column="id" property="id"/>
+        <result column="ticket_no" property="ticketNo"/>
+        <result column="order_id" property="orderId"/>
+        <result column="user_id" property="userId"/>
+        <result column="session_id" property="sessionId"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectCheckInTarget" resultMap="ticketEntityResultMap">
+        SELECT ticket_no, session_id
+        FROM ticket
+        WHERE ticket_no = #{ticketNo}
+    </select>
+
+    <update id="markUsedIfValid">
+        UPDATE ticket
+        SET status = 'USED',
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE ticket_no = #{ticketNo}
+          AND session_id = #{sessionId}
+          AND status = 'VALID'
+    </update>
+
+    <select id="selectCheckInState" resultMap="ticketEntityResultMap">
+        SELECT ticket_no, session_id, status
+        FROM ticket
+        WHERE ticket_no = #{ticketNo}
+          AND session_id = #{sessionId}
+    </select>
+</mapper>
