@@ -16,7 +16,7 @@
 `eventhub-inventory` 当前负责：
 
 - Session 库存
-- 库存初始化、锁定和释放
+- 库存初始化、锁定、释放和 Refund `sold → available` mutation
 
 未来方向中，FLASH Redis 高并发库存、Lua 原子 Reservation 与 Fail Fast 是
 `FUTURE / FROZEN / NOT_IMPLEMENTED`；WaitingList 与限流 capability 为
@@ -89,7 +89,7 @@ Event 必须通过 EventSession 对应具体库存。
 `lockedStock - 1`
 `availableStock + 1`
 
-未来退款（`FUTURE / FROZEN / NOT_IMPLEMENTED`）：
+退款：
 
 `soldStock - 1`
 `availableStock + 1`
@@ -234,9 +234,10 @@ FLASH Redis Failure
 
 # 9. 库存释放必须幂等
 
-当前 NORMAL 释放由 Order 事务所有者通过 `MANDATORY` Inventory mutation
-参与同一事务。以下 Reservation / MQ / Compensation 规则属于未来方向；精确
-Reservation identity 与持久化模型尚未冻结。
+当前 NORMAL 释放与 Phase 9 Refund `sold → available` 都由 Order 事务所有者
+调用，Inventory mutation 通过 `MANDATORY` 参与同一事务。以下 Reservation /
+MQ / Compensation 规则属于未来方向；精确 Reservation identity 与持久化模型
+尚未冻结。
 
 同一个 Reservation 对应的库存只能被有效释放一次。
 
@@ -342,8 +343,9 @@ Inventory 同样不得直接访问其他业务模块的 Mapper 或 Repository。
 事务编排，并按 `Order → Inventory` 调用本模块 Public API。Inventory mutation
 使用 `MANDATORY` 加入 Order 外层事务。
 
-未来 Refund 的事务所有者尚未冻结；Inventory 只保留已经冻结的
-`sold → available` 业务方向，不拥有 Refund lifecycle。
+Phase 9 Refund 由 `eventhub-order` 持有 `READ_COMMITTED` 本地事务，并按
+`Order → Ticket → Inventory` 调用本模块 `sold → available` 的 Public API；
+Inventory 以 `MANDATORY` 参与，不拥有 Refund lifecycle。
 
 Order 模块不得直接操作 InventoryMapper。
 

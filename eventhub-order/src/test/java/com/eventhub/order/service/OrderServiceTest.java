@@ -13,17 +13,23 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.eventhub.event.api.PublicEventQueryApi;
 import com.eventhub.event.api.model.EventSessionView;
 import com.eventhub.inventory.api.InventoryReservationApi;
+import com.eventhub.inventory.api.InventoryRefundApi;
 import com.eventhub.inventory.api.error.InventoryErrorCode;
 import com.eventhub.inventory.api.error.InventoryException;
 import com.eventhub.order.api.error.OrderErrorCode;
 import com.eventhub.order.api.error.OrderException;
 import com.eventhub.order.api.model.OrderStatus;
+import com.eventhub.order.api.model.RefundResult;
 import com.eventhub.order.mapper.OrderMapper;
 import com.eventhub.order.repository.OrderEntity;
 import com.eventhub.ticket.api.TicketIssuanceApi;
+import com.eventhub.ticket.api.TicketRefundApi;
 import com.eventhub.ticket.api.command.IssueTicketCommand;
+import com.eventhub.ticket.api.command.RefundTicketCommand;
 import com.eventhub.ticket.api.error.TicketErrorCode;
 import com.eventhub.ticket.api.error.TicketException;
+import com.eventhub.ticket.api.error.TicketRefundException;
+import com.eventhub.ticket.api.error.TicketRefundFailure;
 import com.eventhub.ticket.api.model.TicketStatus;
 import com.eventhub.ticket.api.model.TicketView;
 import org.junit.jupiter.api.Test;
@@ -365,6 +371,137 @@ class OrderServiceTest {
         }
     }
 
+    @Test
+    void refundsPaidOrderInFrozenOrderWithOneTimeSnapshot() {
+        TestContext context = refundableContext();
+
+        RefundResult result = context.service().refund(USER_ID, 501L);
+
+        assertEquals(501L, result.orderId());
+        assertEquals(OrderStatus.REFUNDED, result.status());
+        assertEquals(1, context.clock().instantCalls());
+        ArgumentCaptor<RefundTicketCommand> command = ArgumentCaptor.forClass(RefundTicketCommand.class);
+        InOrder order = inOrder(context.orderMapper(), context.ticketRefundApi(), context.inventoryRefundApi());
+        order.verify(context.orderMapper()).markRefundedIfPaid(501L, USER_ID, SESSION_ID);
+        order.verify(context.ticketRefundApi()).refundTicket(command.capture());
+        order.verify(context.inventoryRefundApi()).refundSoldOne(SESSION_ID);
+        assertEquals(501L, command.getValue().orderId());
+        assertEquals(USER_ID, command.getValue().userId());
+        assertEquals(SESSION_ID, command.getValue().sessionId());
+    }
+
+    @Test
+    void returnsAlreadyRefundedBeforeTimeAndParticipants() {
+        TestContext context = contextAt(FIXED_INSTANT);
+        when(context.orderMapper().selectByIdAndUserId(501L, USER_ID))
+                .thenReturn(order(501L, USER_ID, OrderStatus.REFUNDED, RESERVATION_NOW));
+
+        RefundResult result = context.service().refund(USER_ID, 501L);
+
+        assertEquals(OrderStatus.REFUNDED, result.status());
+        assertEquals(0, context.clock().instantCalls());
+        verify(context.publicEventQueryApi(), never()).getPublishedSession(anyLong());
+        verify(context.orderMapper(), never()).markRefundedIfPaid(anyLong(), anyLong(), anyLong());
+        verify(context.ticketRefundApi(), never()).refundTicket(any());
+        verify(context.inventoryRefundApi(), never()).refundSoldOne(anyLong());
+    }
+
+    @Test
+    void rejectsNonPaidRefundStatesBeforeTimeAndParticipants() {
+        for (OrderStatus status : new OrderStatus[]{OrderStatus.WAIT_PAY, OrderStatus.CLOSED, OrderStatus.CANCELLED}) {
+            TestContext context = contextAt(FIXED_INSTANT);
+            when(context.orderMapper().selectByIdAndUserId(501L, USER_ID))
+                    .thenReturn(order(501L, USER_ID, status, RESERVATION_NOW));
+
+            OrderException exception = assertThrows(
+                    OrderException.class, () -> context.service().refund(USER_ID, 501L));
+
+            assertEquals(OrderErrorCode.ORDER_NOT_REFUNDABLE, exception.getErrorCode());
+            assertEquals(0, context.clock().instantCalls());
+            verify(context.ticketRefundApi(), never()).refundTicket(any());
+            verify(context.inventoryRefundApi(), never()).refundSoldOne(anyLong());
+        }
+    }
+
+    @Test
+    void rejectsRefundAtAndAfterSessionStart() {
+        for (LocalDateTime startAt : new LocalDateTime[]{RESERVATION_NOW, RESERVATION_NOW.minusNanos(1_000)}) {
+            TestContext context = contextAt(FIXED_INSTANT);
+            when(context.orderMapper().selectByIdAndUserId(501L, USER_ID))
+                    .thenReturn(order(501L, USER_ID, OrderStatus.PAID, RESERVATION_NOW));
+            when(context.publicEventQueryApi().getPublishedSession(SESSION_ID))
+                    .thenReturn(sessionStartingAt(startAt));
+
+            OrderException exception = assertThrows(
+                    OrderException.class, () -> context.service().refund(USER_ID, 501L));
+
+            assertEquals(OrderErrorCode.ORDER_REFUND_WINDOW_CLOSED, exception.getErrorCode());
+            assertEquals(1, context.clock().instantCalls());
+            verify(context.orderMapper(), never()).markRefundedIfPaid(anyLong(), anyLong(), anyLong());
+        }
+    }
+
+    @Test
+    void zeroRowRefundReturnsCommittedRefundedWithoutParticipants() {
+        TestContext context = contextAt(FIXED_INSTANT);
+        OrderEntity paid = order(501L, USER_ID, OrderStatus.PAID, RESERVATION_NOW);
+        OrderEntity refunded = order(501L, USER_ID, OrderStatus.REFUNDED, RESERVATION_NOW);
+        when(context.orderMapper().selectByIdAndUserId(501L, USER_ID)).thenReturn(paid, refunded);
+        when(context.publicEventQueryApi().getPublishedSession(SESSION_ID))
+                .thenReturn(sessionStartingAt(RESERVATION_NOW.plusHours(1)));
+        when(context.orderMapper().markRefundedIfPaid(501L, USER_ID, SESSION_ID)).thenReturn(0);
+
+        assertEquals(OrderStatus.REFUNDED, context.service().refund(USER_ID, 501L).status());
+
+        verify(context.ticketRefundApi(), never()).refundTicket(any());
+        verify(context.inventoryRefundApi(), never()).refundSoldOne(anyLong());
+    }
+
+    @Test
+    void zeroRowRefundTreatsNonRefundedReloadAsInternalFailure() {
+        TestContext context = contextAt(FIXED_INSTANT);
+        OrderEntity paid = order(501L, USER_ID, OrderStatus.PAID, RESERVATION_NOW);
+        when(context.orderMapper().selectByIdAndUserId(501L, USER_ID)).thenReturn(paid, paid);
+        when(context.publicEventQueryApi().getPublishedSession(SESSION_ID))
+                .thenReturn(sessionStartingAt(RESERVATION_NOW.plusHours(1)));
+        when(context.orderMapper().markRefundedIfPaid(501L, USER_ID, SESSION_ID)).thenReturn(0);
+
+        assertThrows(IllegalStateException.class, () -> context.service().refund(USER_ID, 501L));
+
+        verify(context.ticketRefundApi(), never()).refundTicket(any());
+        verify(context.inventoryRefundApi(), never()).refundSoldOne(anyLong());
+    }
+
+    @Test
+    void translatesUsedTicketAndKeepsInventoryUntouched() {
+        TestContext context = refundableContext();
+        doThrow(new TicketRefundException(TicketRefundFailure.USED))
+                .when(context.ticketRefundApi()).refundTicket(any());
+
+        OrderException exception = assertThrows(
+                OrderException.class, () -> context.service().refund(USER_ID, 501L));
+
+        assertEquals(OrderErrorCode.ORDER_REFUND_TICKET_USED, exception.getErrorCode());
+        verify(context.inventoryRefundApi(), never()).refundSoldOne(anyLong());
+    }
+
+    @Test
+    void containsTicketAndInventoryParticipantConsistencyFailuresAsInternal() {
+        TestContext ticketContext = refundableContext();
+        doThrow(new TicketRefundException(TicketRefundFailure.INCONSISTENT_STATE))
+                .when(ticketContext.ticketRefundApi()).refundTicket(any());
+        assertThrows(IllegalStateException.class,
+                () -> ticketContext.service().refund(USER_ID, 501L));
+        verify(ticketContext.inventoryRefundApi(), never()).refundSoldOne(anyLong());
+
+        TestContext inventoryContext = refundableContext();
+        InventoryException inventoryFailure = new InventoryException(InventoryErrorCode.INVENTORY_STATE_CONFLICT);
+        doThrow(inventoryFailure).when(inventoryContext.inventoryRefundApi()).refundSoldOne(SESSION_ID);
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class, () -> inventoryContext.service().refund(USER_ID, 501L));
+        assertSame(inventoryFailure, thrown.getCause());
+    }
+
     private static TestContext duplicateContext(String constraint, int vendorCode, String sqlState) {
         TestContext context = contextAt(FIXED_INSTANT);
         when(context.publicEventQueryApi().getPublishedSession(SESSION_ID))
@@ -381,17 +518,32 @@ class OrderServiceTest {
     private static TestContext contextAt(Instant instant) {
         PublicEventQueryApi publicEventQueryApi = mock(PublicEventQueryApi.class);
         InventoryReservationApi inventoryReservationApi = mock(InventoryReservationApi.class);
+        InventoryRefundApi inventoryRefundApi = mock(InventoryRefundApi.class);
         TicketIssuanceApi ticketIssuanceApi = mock(TicketIssuanceApi.class);
+        TicketRefundApi ticketRefundApi = mock(TicketRefundApi.class);
         OrderMapper orderMapper = mock(OrderMapper.class);
         CountingClock clock = new CountingClock(Clock.fixed(instant, ZoneOffset.UTC));
         return new TestContext(
                 new OrderService(
-                        publicEventQueryApi, inventoryReservationApi, ticketIssuanceApi, orderMapper, clock),
+                        publicEventQueryApi, inventoryReservationApi, inventoryRefundApi,
+                        ticketIssuanceApi, ticketRefundApi, orderMapper, clock),
                 publicEventQueryApi,
                 inventoryReservationApi,
+                inventoryRefundApi,
                 ticketIssuanceApi,
+                ticketRefundApi,
                 orderMapper,
                 clock);
+    }
+
+    private static TestContext refundableContext() {
+        TestContext context = contextAt(FIXED_INSTANT);
+        when(context.orderMapper().selectByIdAndUserId(501L, USER_ID))
+                .thenReturn(order(501L, USER_ID, OrderStatus.PAID, RESERVATION_NOW));
+        when(context.publicEventQueryApi().getPublishedSession(SESSION_ID))
+                .thenReturn(sessionStartingAt(RESERVATION_NOW.plusHours(1)));
+        when(context.orderMapper().markRefundedIfPaid(501L, USER_ID, SESSION_ID)).thenReturn(1);
+        return context;
     }
 
     private static void stubSuccessfulInsert(OrderMapper orderMapper) {
@@ -438,6 +590,20 @@ class OrderServiceTest {
                 RESERVATION_NOW.minusDays(1));
     }
 
+    private static EventSessionView sessionStartingAt(LocalDateTime startAt) {
+        return new EventSessionView(
+                SESSION_ID,
+                81L,
+                "Session",
+                null,
+                startAt.minusDays(2),
+                startAt.minusDays(1),
+                startAt,
+                startAt.plusHours(1),
+                RESERVATION_NOW.minusDays(1),
+                RESERVATION_NOW.minusDays(1));
+    }
+
     private static TicketView ticket(long orderId, long sessionId) {
         return new TicketView(
                 "TKT-0123456789ABCDEF0123456789ABCDEF",
@@ -451,7 +617,9 @@ class OrderServiceTest {
             OrderService service,
             PublicEventQueryApi publicEventQueryApi,
             InventoryReservationApi inventoryReservationApi,
+            InventoryRefundApi inventoryRefundApi,
             TicketIssuanceApi ticketIssuanceApi,
+            TicketRefundApi ticketRefundApi,
             OrderMapper orderMapper,
             CountingClock clock) {
     }

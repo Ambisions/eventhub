@@ -291,7 +291,7 @@ Lua 只负责：
 =
 一次异步抢票请求及其处理状态
 
-未来退款（`FUTURE / FROZEN / NOT_IMPLEMENTED`）可以恢复库存，
+当前 Refund Foundation（`CURRENT / FROZEN / IMPLEMENTED`）可以恢复库存，
 但不能因为退款删除历史 purchased 资格。
 
 重复 Reservation 请求不得重复扣减库存。

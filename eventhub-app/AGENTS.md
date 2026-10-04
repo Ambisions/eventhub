@@ -122,9 +122,11 @@ ApplicationService 围绕明确的跨领域 Use Case 组织。
 ApplicationService。
 
 Phase 6 NORMAL Order Lifecycle 是已冻结的窄例外：Reserve、Pay、Cancel 和
-Timeout 由 `eventhub-order` 拥有事务编排；App 仅提供 Controller、Security、
-Scheduler、配置、Runtime Adapter 与 Composition Root。Refund 与 WaitingList
-的未来事务所有者尚未冻结，不得把某个 App ApplicationService 写成硬性要求。
+Timeout 由 `eventhub-order` 拥有事务编排；Phase 7 Pay-to-Ticket 与 Phase 9
+Refund 是该生命周期的冻结窄扩展。App 仅提供 Controller、Security、Scheduler、
+配置、Runtime Adapter 与 Composition Root。Refund Controller 直接委托
+`OrderCommandApi`，App 不持有 Refund transaction。WaitingList 的未来事务所有者
+尚未冻结。这些例外不构成跨领域流程的通用先例。
 
 禁止创建系统级超级 Service，例如：
 
@@ -167,6 +169,9 @@ Order API / Order Service
 执行条件库存更新
 
 如果两步必须原子成功或失败，应处于同一个 Spring 本地事务中。
+
+Phase 9 Refund 同样由 Order Service 持有 `READ_COMMITTED` 本地事务，按
+`Order → Ticket → Inventory` 执行；Ticket 与 Inventory 以 `MANDATORY` 参与。
 
 跨 Maven Module：
 
@@ -276,11 +281,12 @@ Timeout 的事务编排。
 
 只有 Order 条件状态更新成功，才允许执行一次库存副作用。
 
-退款属于 `FUTURE / FROZEN / NOT_IMPLEMENTED`：`PAID → REFUNDED`、退款幂等、
-Inventory `sold → available` 以及同一 Session 的历史购买资格不恢复均已冻结。
-Refund API、事务所有者、Ticket 精确退款状态与 MQ 实现仍为
-`FUTURE / NOT_YET_FROZEN / NOT_IMPLEMENTED`，不得把 `RefundApplicationService`
-写成强制所有者。
+退款为 `CURRENT / FROZEN / IMPLEMENTED`：只有 Order Owner 可调用现有 Refund
+HTTP endpoint，Controller 从 JWT principal 取得 userId 并委托
+`OrderCommandApi`。Order Service 持有事务并按 `Order → Ticket → Inventory`
+完成 `PAID → REFUNDED`、Ticket `VALID → REFUNDED` 和 Inventory
+`sold → available`；同一 Session 的历史购买资格不恢复。App 不建立
+`RefundApplicationService`，也不拥有该事务。
 
 ---
 
@@ -438,7 +444,7 @@ PAID + locked → sold + 重复调用
 取消：
 CANCELLED + locked → available + 重复调用
 
-未来退款（`FUTURE / FROZEN / NOT_IMPLEMENTED`）：
+当前退款：
 REFUNDED + sold → available + 历史购买资格不恢复
 
 未来 FLASH（核心方向 `FUTURE / FROZEN / NOT_IMPLEMENTED`）：

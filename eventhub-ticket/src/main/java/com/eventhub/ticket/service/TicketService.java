@@ -10,11 +10,15 @@ import com.eventhub.ticket.api.TicketIssuanceApi;
 import com.eventhub.ticket.api.TicketCheckInCommandApi;
 import com.eventhub.ticket.api.TicketCheckInQueryApi;
 import com.eventhub.ticket.api.TicketQueryApi;
+import com.eventhub.ticket.api.TicketRefundApi;
 import com.eventhub.ticket.api.command.IssueTicketCommand;
+import com.eventhub.ticket.api.command.RefundTicketCommand;
 import com.eventhub.ticket.api.error.TicketErrorCode;
 import com.eventhub.ticket.api.error.TicketException;
 import com.eventhub.ticket.api.error.TicketCheckInException;
 import com.eventhub.ticket.api.error.TicketCheckInFailure;
+import com.eventhub.ticket.api.error.TicketRefundException;
+import com.eventhub.ticket.api.error.TicketRefundFailure;
 import com.eventhub.ticket.api.model.TicketCheckInResult;
 import com.eventhub.ticket.api.model.TicketCheckInTarget;
 import com.eventhub.ticket.api.model.TicketStatus;
@@ -29,7 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TicketService implements TicketIssuanceApi, TicketQueryApi,
-        TicketCheckInQueryApi, TicketCheckInCommandApi {
+        TicketCheckInQueryApi, TicketCheckInCommandApi, TicketRefundApi {
 
     private static final int MYSQL_DUPLICATE_KEY_ERROR_CODE = 1062;
     private static final String SQL_STATE_INTEGRITY_CONSTRAINT_VIOLATION = "23000";
@@ -114,7 +118,36 @@ public class TicketService implements TicketIssuanceApi, TicketQueryApi,
         if (current.getStatus() == TicketStatus.USED) {
             throw new TicketCheckInException(TicketCheckInFailure.ALREADY_USED);
         }
+        if (current.getStatus() == TicketStatus.REFUNDED) {
+            throw new TicketCheckInException(TicketCheckInFailure.REFUNDED);
+        }
         throw new IllegalStateException("Ticket remained VALID after a zero-row check-in update");
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void refundTicket(RefundTicketCommand command) {
+        validateRefundCommand(command);
+
+        int affectedRows = ticketMapper.markRefundedIfValid(
+                command.orderId(), command.userId(), command.sessionId());
+        if (affectedRows == 1) {
+            return;
+        }
+        if (affectedRows != 0) {
+            throw refundInconsistent();
+        }
+
+        TicketEntity current = ticketMapper.selectRefundStateByOrderId(command.orderId());
+        if (current == null
+                || !Objects.equals(current.getUserId(), command.userId())
+                || !Objects.equals(current.getSessionId(), command.sessionId())) {
+            throw refundInconsistent();
+        }
+        if (current.getStatus() == TicketStatus.USED) {
+            throw new TicketRefundException(TicketRefundFailure.USED);
+        }
+        throw refundInconsistent();
     }
 
     private void insertTicket(TicketEntity ticket) {
@@ -149,6 +182,19 @@ public class TicketService implements TicketIssuanceApi, TicketQueryApi,
         }
     }
 
+    private static void validateRefundCommand(RefundTicketCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        if (command.orderId() <= 0) {
+            throw new IllegalArgumentException("orderId must be positive");
+        }
+        if (command.userId() <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        if (command.sessionId() <= 0) {
+            throw new IllegalArgumentException("sessionId must be positive");
+        }
+    }
+
     private static void validateCheckInTicketNumber(String ticketNo) {
         if (ticketNo == null || !TICKET_NUMBER_PATTERN.matcher(ticketNo).matches()) {
             throw checkInNotFound();
@@ -157,6 +203,10 @@ public class TicketService implements TicketIssuanceApi, TicketQueryApi,
 
     private static TicketCheckInException checkInNotFound() {
         return new TicketCheckInException(TicketCheckInFailure.NOT_FOUND);
+    }
+
+    private static TicketRefundException refundInconsistent() {
+        return new TicketRefundException(TicketRefundFailure.INCONSISTENT_STATE);
     }
 
     private static String duplicateConstraint(Throwable exception) {

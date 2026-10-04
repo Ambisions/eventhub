@@ -4,7 +4,8 @@ public enum CheckInErrorCode {
     TICKET_NOT_FOUND("TICKET_NOT_FOUND", "Ticket not found"),
     TICKET_CHECK_IN_NOT_STARTED("TICKET_CHECK_IN_NOT_STARTED", "Ticket check-in has not started"),
     TICKET_CHECK_IN_CLOSED("TICKET_CHECK_IN_CLOSED", "Ticket check-in is closed"),
-    TICKET_ALREADY_USED("TICKET_ALREADY_USED", "Ticket has already been used");
+    TICKET_ALREADY_USED("TICKET_ALREADY_USED", "Ticket has already been used"),
+    TICKET_REFUNDED("TICKET_REFUNDED", "Ticket has been refunded");
 
     private final String code;
     private final String defaultMessage;

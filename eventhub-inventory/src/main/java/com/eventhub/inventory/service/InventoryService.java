@@ -4,6 +4,7 @@ import java.util.Objects;
 
 import com.eventhub.event.api.OrganizerEventSessionGuardApi;
 import com.eventhub.inventory.api.InventoryManagementApi;
+import com.eventhub.inventory.api.InventoryRefundApi;
 import com.eventhub.inventory.api.InventoryReservationApi;
 import com.eventhub.inventory.api.command.ConfigureInventoryCommand;
 import com.eventhub.inventory.api.error.InventoryErrorCode;
@@ -17,7 +18,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public class InventoryService implements InventoryManagementApi, InventoryReservationApi {
+public class InventoryService implements InventoryManagementApi, InventoryReservationApi, InventoryRefundApi {
 
     private static final String SESSION_UNIQUE_CONSTRAINT = "uk_event_inventory_session";
 
@@ -74,6 +75,14 @@ public class InventoryService implements InventoryManagementApi, InventoryReserv
     @Transactional(propagation = Propagation.MANDATORY)
     public void releaseOne(long sessionId) {
         if (inventoryMapper.releaseOne(sessionId) != 1) {
+            throw new InventoryException(InventoryErrorCode.INVENTORY_STATE_CONFLICT);
+        }
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void refundSoldOne(long sessionId) {
+        if (inventoryMapper.refundSoldOne(sessionId) != 1) {
             throw new InventoryException(InventoryErrorCode.INVENTORY_STATE_CONFLICT);
         }
     }

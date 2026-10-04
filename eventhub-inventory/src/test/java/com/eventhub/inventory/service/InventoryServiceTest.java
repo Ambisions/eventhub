@@ -135,6 +135,26 @@ class InventoryServiceTest {
                 InventoryErrorCode.INVENTORY_STATE_CONFLICT);
     }
 
+    @Test
+    void refundsSoldInventoryWithOneConditionalMutation() {
+        when(inventoryMapper.refundSoldOne(SESSION_ID)).thenReturn(1);
+
+        inventoryService.refundSoldOne(SESSION_ID);
+
+        verify(inventoryMapper).refundSoldOne(SESSION_ID);
+        verify(inventoryMapper, never()).selectBySessionId(SESSION_ID);
+    }
+
+    @Test
+    void mapsRefundMutationFailureToInventoryStateConflict() {
+        when(inventoryMapper.refundSoldOne(SESSION_ID)).thenReturn(0);
+
+        assertInventoryError(() -> inventoryService.refundSoldOne(SESSION_ID),
+                InventoryErrorCode.INVENTORY_STATE_CONFLICT);
+
+        verify(inventoryMapper, never()).selectBySessionId(SESSION_ID);
+    }
+
     private static InventoryEntity inventory(int total, int available, int locked, int sold) {
         InventoryEntity entity = new InventoryEntity();
         entity.setId(1L);

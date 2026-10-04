@@ -669,3 +669,35 @@ Status: `COMPLETE / VERIFIED / FROZEN`
 - Independent residue checks found all six business tables empty, zero invalid Ticket
   state, zero EventHub Redis keys, and zero RabbitMQ application topology/connections.
   Formal Reviewer and Phase-level Test Reviewer both passed with no blocking gap.
+
+## Phase 9 — Refund Foundation
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+### Batch 1 — Refund Contract Freeze
+
+Status: `COMPLETE / FROZEN`
+
+### Batch 2 — V3 Schema
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+### Batch 3 — Refund Participants
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+### Batch 4 — Refund Orchestration / HTTP / Security
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+### Batch 5 — Final Verification / Evidence / Docs / Freeze
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+- Fresh MySQL 8.4.11 verification applied Flyway V1, V2, then V3 successfully.
+- Targeted verification passed 25 suites / 175 tests with zero failures, errors, or
+  skips. The final Root + 9 Module `clean verify` passed 49 suites / 245 tests with
+  zero failures, errors, or skips; Spring Boot repackage succeeded.
+- Real MySQL row-lock waiting and rollback handoff were proven for concurrent Refund;
+  the waiting transaction re-evaluated committed state after the winner rolled back.
+- Formal Reviewer and Phase-level Test Reviewer both passed with no blocking gap.

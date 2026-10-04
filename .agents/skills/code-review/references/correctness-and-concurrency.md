@@ -105,7 +105,7 @@ WAIT_PAY → CANCELLED
 
 WAIT_PAY → CLOSED（Timeout 是 operation / trigger，`CLOSED` 是持久状态）
 
-未来冻结转换：PAID → REFUNDED（`FUTURE / FROZEN / NOT_IMPLEMENTED`）
+当前转换：PAID → REFUNDED（`CURRENT / FROZEN / IMPLEMENTED`）
 
 检查是否出现：
 
@@ -159,8 +159,7 @@ affectedRows
 
 # 7. Purchase Eligibility
 
-本节退款规则属于 `FUTURE / FROZEN / NOT_IMPLEMENTED`；不要因尚未实现而
-降级为 Not Yet Frozen，也不要把它当成当前 Production behavior。
+本节退款规则属于 `CURRENT / FROZEN / IMPLEMENTED`。
 
 检查：
 
@@ -191,7 +190,10 @@ purchased
 检查已冻结的事务所有者是否建立了正确 Local Transaction。
 
 Phase 6 NORMAL 的明确例外由 `eventhub-order` 拥有事务，并按
-`Order → Inventory` 调用 Public API；通用默认仍是 App ApplicationService。
+`Order → Inventory` 调用 Public API；Phase 7 Pay-to-Ticket 与 Phase 9 Refund
+是同一生命周期的窄扩展。Refund 由 Order 以 `READ_COMMITTED` 按
+`Order → Ticket → Inventory` 编排，Ticket / Inventory 以 `MANDATORY` 参与；
+通用默认仍是 App ApplicationService，这些例外不构成通用先例。
 
 例如 NORMAL：
 

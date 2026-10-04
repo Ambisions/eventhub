@@ -15,4 +15,6 @@ public interface InventoryMapper extends BaseMapper<InventoryEntity> {
     int confirmSoldOne(@Param("sessionId") long sessionId);
 
     int releaseOne(@Param("sessionId") long sessionId);
+
+    int refundSoldOne(@Param("sessionId") long sessionId);
 }

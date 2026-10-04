@@ -36,4 +36,20 @@
         WHERE ticket_no = #{ticketNo}
           AND session_id = #{sessionId}
     </select>
+
+    <update id="markRefundedIfValid">
+        UPDATE ticket
+        SET status = 'REFUNDED',
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE order_id = #{orderId}
+          AND user_id = #{userId}
+          AND session_id = #{sessionId}
+          AND status = 'VALID'
+    </update>
+
+    <select id="selectRefundStateByOrderId" resultMap="ticketEntityResultMap">
+        SELECT order_id, user_id, session_id, status
+        FROM ticket
+        WHERE order_id = #{orderId}
+    </select>
 </mapper>

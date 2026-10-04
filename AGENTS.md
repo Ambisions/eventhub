@@ -298,11 +298,13 @@ Controller 不负责复杂业务逻辑。
 如果存在用户明确批准并进入 Frozen Contract 的领域生命周期例外，
 则以该例外为准；这不表示业务模块可以自由扩张编排职责。
 
-当前明确例外仅包括 Phase 6 NORMAL Order Lifecycle：Reserve、Pay、Cancel
-和 Timeout 由 `eventhub-order` 拥有事务编排，Controller / Scheduler 通过
-Order Public API 进入，由 Order Service 按 `Order → Inventory` 调用相关
-公开 API。`eventhub-app` 仍负责 HTTP、Security、Scheduler、配置和
-Composition Root。
+当前明确的窄例外包括：Phase 6 NORMAL Reserve、Pay、Cancel 和 Timeout 由
+`eventhub-order` 拥有事务编排；Phase 7 Pay-to-Ticket 将 Pay 窄扩展为
+`Order → Inventory → Ticket`；Phase 9 Refund 由 Order 以
+`Order → Ticket → Inventory` 编排。Controller / Scheduler 通过 Order Public API
+进入，参与模块只通过公开 API 加入同一事务。`eventhub-app` 仍负责 HTTP、
+Security、Scheduler、配置和 Composition Root。这些冻结例外不构成把所有
+Order-related 跨领域 Use Case 都归入 `eventhub-order` 的通用先例。
 
 禁止：
 

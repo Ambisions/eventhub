@@ -15,4 +15,11 @@ public interface TicketMapper extends BaseMapper<TicketEntity> {
     TicketEntity selectCheckInState(
             @Param("ticketNo") String ticketNo,
             @Param("sessionId") long sessionId);
+
+    int markRefundedIfValid(
+            @Param("orderId") long orderId,
+            @Param("userId") long userId,
+            @Param("sessionId") long sessionId);
+
+    TicketEntity selectRefundStateByOrderId(@Param("orderId") long orderId);
 }

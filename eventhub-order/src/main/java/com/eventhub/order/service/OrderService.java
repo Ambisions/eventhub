@@ -11,6 +11,8 @@ import java.util.UUID;
 import com.eventhub.event.api.PublicEventQueryApi;
 import com.eventhub.event.api.model.EventSessionView;
 import com.eventhub.inventory.api.InventoryReservationApi;
+import com.eventhub.inventory.api.InventoryRefundApi;
+import com.eventhub.inventory.api.error.InventoryException;
 import com.eventhub.order.api.OrderCommandApi;
 import com.eventhub.order.api.OrderQueryApi;
 import com.eventhub.order.api.ReservationApi;
@@ -19,10 +21,15 @@ import com.eventhub.order.api.error.OrderException;
 import com.eventhub.order.api.model.OrderStatus;
 import com.eventhub.order.api.model.OrderView;
 import com.eventhub.order.api.model.PaymentResult;
+import com.eventhub.order.api.model.RefundResult;
 import com.eventhub.order.mapper.OrderMapper;
 import com.eventhub.order.repository.OrderEntity;
 import com.eventhub.ticket.api.TicketIssuanceApi;
+import com.eventhub.ticket.api.TicketRefundApi;
 import com.eventhub.ticket.api.command.IssueTicketCommand;
+import com.eventhub.ticket.api.command.RefundTicketCommand;
+import com.eventhub.ticket.api.error.TicketRefundException;
+import com.eventhub.ticket.api.error.TicketRefundFailure;
 import com.eventhub.ticket.api.model.TicketView;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -40,19 +47,25 @@ public class OrderService implements ReservationApi, OrderQueryApi, OrderCommand
 
     private final PublicEventQueryApi publicEventQueryApi;
     private final InventoryReservationApi inventoryReservationApi;
+    private final InventoryRefundApi inventoryRefundApi;
     private final TicketIssuanceApi ticketIssuanceApi;
+    private final TicketRefundApi ticketRefundApi;
     private final OrderMapper orderMapper;
     private final Clock clock;
 
     public OrderService(
             PublicEventQueryApi publicEventQueryApi,
             InventoryReservationApi inventoryReservationApi,
+            InventoryRefundApi inventoryRefundApi,
             TicketIssuanceApi ticketIssuanceApi,
+            TicketRefundApi ticketRefundApi,
             OrderMapper orderMapper,
             Clock clock) {
         this.publicEventQueryApi = publicEventQueryApi;
         this.inventoryReservationApi = inventoryReservationApi;
+        this.inventoryRefundApi = inventoryRefundApi;
         this.ticketIssuanceApi = ticketIssuanceApi;
+        this.ticketRefundApi = ticketRefundApi;
         this.orderMapper = orderMapper;
         this.clock = clock;
     }
@@ -129,6 +142,36 @@ public class OrderService implements ReservationApi, OrderQueryApi, OrderCommand
         return toView(requireOwnedOrder(userId, orderId));
     }
 
+    @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public RefundResult refund(long userId, long orderId) {
+        OrderEntity current = requireOwnedOrder(userId, orderId);
+        if (current.getStatus() == OrderStatus.REFUNDED) {
+            return refunded(orderId);
+        }
+        if (current.getStatus() != OrderStatus.PAID) {
+            throw new OrderException(OrderErrorCode.ORDER_NOT_REFUNDABLE);
+        }
+
+        LocalDateTime refundTime = currentUtcTime();
+        EventSessionView session = requireRefundSession(current.getSessionId());
+        if (!refundTime.isBefore(session.startAt())) {
+            throw new OrderException(OrderErrorCode.ORDER_REFUND_WINDOW_CLOSED);
+        }
+
+        int affectedRows = orderMapper.markRefundedIfPaid(orderId, userId, current.getSessionId());
+        if (affectedRows == 0) {
+            return classifyRefundUpdateLoss(userId, orderId);
+        }
+        if (affectedRows != 1) {
+            throw refundInconsistent("Refund update affected an unexpected number of rows", null);
+        }
+
+        refundTicket(current);
+        refundInventory(current.getSessionId());
+        return refunded(orderId);
+    }
+
     private void insertWaitPay(OrderEntity order) {
         try {
             int affectedRows = orderMapper.insertWaitPay(order);
@@ -171,6 +214,50 @@ public class OrderService implements ReservationApi, OrderQueryApi, OrderCommand
         return latest == null
                 ? new OrderException(OrderErrorCode.ORDER_NOT_FOUND)
                 : new OrderException(OrderErrorCode.ORDER_STATE_CONFLICT);
+    }
+
+    private EventSessionView requireRefundSession(long sessionId) {
+        try {
+            return publicEventQueryApi.getPublishedSession(sessionId);
+        } catch (RuntimeException exception) {
+            throw refundInconsistent("Refund session could not be resolved", exception);
+        }
+    }
+
+    private RefundResult classifyRefundUpdateLoss(long userId, long orderId) {
+        OrderEntity latest = orderMapper.selectByIdAndUserId(orderId, userId);
+        if (latest != null && latest.getStatus() == OrderStatus.REFUNDED) {
+            return refunded(orderId);
+        }
+        throw refundInconsistent("Refund update lost without a committed REFUNDED order", null);
+    }
+
+    private void refundTicket(OrderEntity order) {
+        try {
+            ticketRefundApi.refundTicket(new RefundTicketCommand(
+                    order.getId(), order.getUserId(), order.getSessionId()));
+        } catch (TicketRefundException exception) {
+            if (exception.getFailure() == TicketRefundFailure.USED) {
+                throw new OrderException(OrderErrorCode.ORDER_REFUND_TICKET_USED, exception);
+            }
+            throw refundInconsistent("Ticket state is inconsistent with refund processing", exception);
+        }
+    }
+
+    private void refundInventory(long sessionId) {
+        try {
+            inventoryRefundApi.refundSoldOne(sessionId);
+        } catch (InventoryException exception) {
+            throw refundInconsistent("Inventory state is inconsistent with refund processing", exception);
+        }
+    }
+
+    private static RefundResult refunded(long orderId) {
+        return new RefundResult(orderId, OrderStatus.REFUNDED);
+    }
+
+    private static IllegalStateException refundInconsistent(String message, Throwable cause) {
+        return cause == null ? new IllegalStateException(message) : new IllegalStateException(message, cause);
     }
 
     private LocalDateTime currentUtcTime() {

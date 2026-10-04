@@ -1,10 +1,11 @@
 # EventHub V1 Baseline Schema
 
-Status: `V1 FROZEN / IMPLEMENTED / RUNTIME VERIFIED; V2 FROZEN / IMPLEMENTED / RUNTIME VERIFIED`
+Status: `V1 / V2 / V3 FROZEN / IMPLEMENTED / RUNTIME VERIFIED`
 
-This document explains the frozen schema design. The verified Flyway V1 and V2
+This document explains the frozen schema design. The verified Flyway V1, V2, and V3
 migrations are the executable source of truth for the current database. The Phase 5
-V2 section below records the implemented and runtime-verified schema evolution.
+V2 and Phase 9 V3 sections below record the implemented and runtime-verified schema
+evolution.
 
 ## Scope
 
@@ -103,6 +104,22 @@ rejection-reason lookup query exists.
 - The probes left no synthetic User or Event rows, and V2 introduced no index.
 - A second focused run and the full Maven `clean verify` confirmed that V2 is not
   reapplied and the existing application baseline remains healthy.
+
+## Phase 9 V3 Verified Schema
+
+V3 is limited to extending the existing Order and Ticket status vocabularies and
+preserving historical same-session purchase eligibility after Refund:
+
+- `ticket_order.status` adds `REFUNDED`.
+- generated `ticket_order.purchase_guard` yields `1` for `WAIT_PAY`, `PAID`, and
+  `REFUNDED`, and `NULL` for `CLOSED` and `CANCELLED`.
+- `ticket.status` adds `REFUNDED`.
+
+V3 adds no table, business column, index, foreign key, or trigger. Real MySQL 8.4.11
+verification applied V1, V2, then V3 from an empty schema; Flyway recorded three
+successful migrations with no failure and reported the schema up to date on the
+second run. Metadata and behavior probes verified both expanded status checks and
+the generated purchase-guard behavior.
 
 ### Existing Username Compatibility
 
@@ -206,16 +223,18 @@ The affected-row count determines whether the reservation won the competition.
 | `order_no` | `VARCHAR(64)` | No | None | Unique | Public business order number. |
 | `user_id` | `BIGINT` | No | None | Logical reference to `users.id` | Ordering user. |
 | `session_id` | `BIGINT` | No | None | Logical reference to `event_sessions.id` | Ordered session. |
-| `status` | `VARCHAR(20)` | No | `WAIT_PAY` | Check: `WAIT_PAY`, `PAID`, `CLOSED`, `CANCELLED` | Persisted V1 baseline order state. |
+| `status` | `VARCHAR(20)` | No | `WAIT_PAY` | Check: `WAIT_PAY`, `PAID`, `CLOSED`, `CANCELLED`, `REFUNDED` | Persisted Order state vocabulary through V3. |
 | `expire_at` | `DATETIME(6)` | No | None | None | Payment deadline used by bounded timeout processing. |
-| `purchase_guard` | `TINYINT` | Yes | Generated | Generated: `1` for `WAIT_PAY`/`PAID`, otherwise `NULL` | Supports the database guard against duplicate effective orders. |
+| `purchase_guard` | `TINYINT` | Yes | Generated | Generated: `1` for `WAIT_PAY`/`PAID`/`REFUNDED`, otherwise `NULL` | Preserves the database guard against duplicate effective orders and repurchase after Refund. |
 | `created_at` | `DATETIME(6)` | No | Current timestamp | None | Creation time. |
 | `updated_at` | `DATETIME(6)` | No | Current timestamp | Updated on row change | Last update time. |
 
 `purchase_guard` participates in a unique key over
 `(user_id, session_id, purchase_guard)`. MySQL permits multiple `NULL` values in a
 unique key, so multiple historical `CLOSED` or `CANCELLED` rows are allowed while
-only one `WAIT_PAY` or `PAID` row can exist for the same user and session.
+only one guarded `WAIT_PAY`, `PAID`, or `REFUNDED` row can exist for the same user
+and session. Refund restores inventory but deliberately does not restore same-session
+purchase eligibility.
 
 No `expire_at > created_at` check is added. Deadline validity belongs to order
 creation rules because database time expressions and application-supplied timestamps
@@ -230,16 +249,15 @@ would otherwise introduce avoidable coupling.
 | `order_id` | `BIGINT` | No | None | Unique; logical reference to `ticket_order.id` | Enforces at most one ticket per order. |
 | `user_id` | `BIGINT` | No | None | Part of unique key; logical reference to `users.id` | Ticket owner. |
 | `session_id` | `BIGINT` | No | None | Part of unique key; logical reference to `event_sessions.id` | Ticketed session. |
-| `status` | `VARCHAR(20)` | No | `VALID` | Check: `VALID`, `USED` | Minimal V1 ticket lifecycle. |
+| `status` | `VARCHAR(20)` | No | `VALID` | Check: `VALID`, `USED`, `REFUNDED` | Ticket lifecycle vocabulary through V3. |
 | `created_at` | `DATETIME(6)` | No | Current timestamp | None | Creation time. |
 | `updated_at` | `DATETIME(6)` | No | Current timestamp | Updated on row change | Last update time. |
 
-`UNIQUE(user_id, session_id)` is the V1 database final guard for one ticket per
-user per session. This database guard does not itself prove the future refund
-implementation. The future frozen business rule is that refund restores inventory
-but does not restore same-session purchase eligibility; its technical enforcement and
-exact refund Ticket state remain for the Refund phase. Ticket transfer remains
-undefined. Any later schema change requires a new migration and architecture decision.
+`UNIQUE(user_id, session_id)` remains the database final guard for one ticket per
+user per session. Phase 9 Refund changes a `VALID` Ticket to `REFUNDED` but does not
+delete it, so the same-session purchase guard remains effective. Ticket transfer
+remains undefined. Any later schema change requires a new migration and architecture
+decision.
 
 ## Primary, Unique, and Check Constraints
 
@@ -253,12 +271,12 @@ undefined. Any later schema change requires a new migration and architecture dec
 | `event_inventory` | Four nonnegative checks | Prevents invalid negative stock. |
 | `event_inventory` | Total-equals-components check | Enforces the inventory conservation invariant. |
 | `ticket_order` | Unique `order_no` | One row per public order number. |
-| `ticket_order` | Status check | Restricts the Phase 3 baseline order vocabulary. |
-| `ticket_order` | Unique `(user_id, session_id, purchase_guard)` | Prevents concurrent duplicate effective orders while permitting retries after close/cancel. |
+| `ticket_order` | Status check | Restricts the V3 Order vocabulary, including `REFUNDED`. |
+| `ticket_order` | Unique `(user_id, session_id, purchase_guard)` | Prevents concurrent duplicate effective orders, preserves the guard after Refund, and permits retries only after close/cancel. |
 | `ticket` | Unique `ticket_no` | One row per public ticket number. |
 | `ticket` | Unique `order_id` | At most one ticket generated by an order. |
 | `ticket` | Unique `(user_id, session_id)` | V1 final guard for one user and one session. |
-| `ticket` | Status check | Restricts the minimal ticket lifecycle vocabulary. |
+| `ticket` | Status check | Restricts the V3 Ticket vocabulary to `VALID`, `USED`, and `REFUNDED`. |
 
 ## Business Invariant Mapping
 
@@ -270,7 +288,8 @@ undefined. Any later schema change requires a new migration and architecture dec
 | Payment success | In the Order-owned transaction, expected-state `WAIT_PAY → PAID` succeeds before Inventory locked-to-sold. |
 | Timeout | In the Order-owned transaction, expected-state `WAIT_PAY → CLOSED` succeeds before Inventory locked-to-available. |
 | Active cancellation | In the Order-owned transaction, expected-state `WAIT_PAY → CANCELLED` succeeds before Inventory locked-to-available. |
-| One effective order per user/session | Generated `purchase_guard` unique key prevents concurrent `WAIT_PAY`/`PAID` duplicates. |
+| Refund | In the Order-owned transaction, expected-state `PAID → REFUNDED` succeeds before Ticket `VALID → REFUNDED` and Inventory sold-to-available; Ticket and Inventory participate with `MANDATORY`. |
+| One effective order per user/session | Generated `purchase_guard` unique key prevents concurrent guarded `WAIT_PAY`/`PAID`/`REFUNDED` duplicates. |
 | One V1 ticket per user/session | Unique `(user_id, session_id)` on `ticket`. |
 | Legal state vocabulary | `VARCHAR` status columns with checks; legal transitions still require expected-state conditional updates. |
 | Cross-table atomicity | Spring local transaction over one MySQL datasource; no distributed transaction is needed for this baseline. |
@@ -288,7 +307,9 @@ must use expected-state conditional updates and verify affected rows.
 - Notification records: introduced only if notifications require persistent delivery state.
 - Retry, DLQ, compensation, and reconciliation tables: introduced from concrete failure-recovery requirements.
 - `reservation_id`: not part of current Schema and not a frozen future field; the FLASH phase must freeze the persistence model and database safety line before migration.
-- Refund: `PAID → REFUNDED`, idempotency, `sold → available`, and no same-session purchase-eligibility restoration are Future Frozen business rules. Exact Ticket state, API, transaction owner, MQ implementation and schema changes remain not yet frozen.
+- Financial refund settlement remains deferred: payment-provider integration, money
+  transfer, provider callbacks, asynchronous MQ refund, notification, refund reason,
+  partial refund, and forced/customer-service refund are not implemented.
 
 ## Freeze Decision
 
@@ -300,3 +321,7 @@ must use expected-state conditional updates and verify affected rows.
   table, role model, or index is included.
 - Phase 5 User, Auth, and Event implementations now consume the verified V2 schema;
   no additional Phase 5 schema migration was required.
+- V3 exact schema state: `FROZEN / IMPLEMENTED / RUNTIME VERIFIED`.
+- V3 changes only the Order/Ticket status checks and generated `purchase_guard`
+  expression described above; it adds no table, business column, index, foreign key,
+  or trigger.

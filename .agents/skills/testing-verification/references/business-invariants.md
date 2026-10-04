@@ -149,8 +149,7 @@ CLOSED
 
 # 6. Refund
 
-本节为 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的业务性质验证清单，不是当前
-Production test claim。
+本节为 `CURRENT / FROZEN / IMPLEMENTED` 的业务性质验证清单。
 
 验证：
 
@@ -161,6 +160,13 @@ Inventory：
 
 sold
 → available。
+
+Ticket：
+
+VALID
+→ REFUNDED。
+
+USED Ticket 不可退款；Refund 与 Check-in 的条件更新最多一个获胜。
 
 但：
 
@@ -174,7 +180,7 @@ Historical purchased eligibility
 
 Duplicate Refund：
 
-不得重复恢复库存。
+必须幂等成功，不得重复变更 Ticket 或恢复库存。
 
 ---
 

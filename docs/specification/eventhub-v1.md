@@ -195,9 +195,9 @@ WAIT_PAY → CLOSED
 
 Timeout 是 operation / trigger，`CLOSED` 才是持久状态。
 
-未来退款转换 `PAID → REFUNDED` 为
-`FUTURE / FROZEN / NOT_IMPLEMENTED`。下图同时展示当前状态与这一 Future
-Contract，不表示 `REFUNDED` 已进入当前 Migration 或 Production behavior。
+Phase 9 Refund Foundation 已将 `PAID → REFUNDED` 冻结并实现为
+`CURRENT / FROZEN / IMPLEMENTED / VERIFIED`。V3 已把 `REFUNDED` 加入 Order
+状态约束。
 
 ```text
                      PAY
@@ -211,17 +211,16 @@ WAIT_PAY ─────────────────────→ PAID
 
 ```
 
-其中当前：
+其中：
 
 ```text
 CANCELLED
 CLOSED
+REFUNDED
 
 ```
 
-为终态。
-
-未来 `REFUNDED` 为退款终态。
+均为终态。
 
 ---
 
@@ -274,7 +273,7 @@ available +1
 
 ```
 
-未来退款（`FUTURE / FROZEN / NOT_IMPLEMENTED`）：
+退款（`CURRENT / FROZEN / IMPLEMENTED / VERIFIED`）：
 
 ```text
 sold -1
@@ -593,10 +592,12 @@ Future Planned：WaitingList、限流
 支付
 取消
 超时
+退款
 订单状态机
 
-Future Frozen：退款业务规则、FLASH Reservation concept、Outbox/RabbitMQ direction
-Not Yet Frozen：Refund owner/API、Reservation persistence model、exact MQ contract
+Current Frozen / Implemented：Order-owned Refund Foundation
+Future Frozen：FLASH Reservation concept、Outbox/RabbitMQ direction
+Not Yet Frozen：Reservation persistence model、exact MQ contract
 
 ```
 
@@ -607,9 +608,8 @@ Not Yet Frozen：Refund owner/API、Reservation persistence model、exact MQ con
 ## eventhub-ticket
 
 ```text
-Current Frozen / Implemented：PAID 同步签发 Ticket、Owner-only 单票查询、Event Owner 核销
+Current Frozen / Implemented：PAID 同步签发 Ticket、Owner-only 单票查询、Event Owner 核销、Refund 状态参与
 Future：Ticket 列表尚未实现
-Not Yet Frozen：refund Ticket state/失效方式
 
 ```
 
@@ -741,9 +741,9 @@ UNIQUE(user_id, session_id, purchase_guard)
 
 ```
 
-其中 generated `purchase_guard` 对 `WAIT_PAY` / `PAID` 生成 `1`，
+其中 generated `purchase_guard` 对 `WAIT_PAY` / `PAID` / `REFUNDED` 生成 `1`，
 对 `CLOSED` / `CANCELLED` 生成 `NULL`。它阻止同一用户、同一场次出现
-重复有效订单，同时允许关闭或取消后重新下单。
+重复受保护订单，同时允许关闭或取消后重新下单；退款不会恢复同场次购买资格。
 
 索引：
 
@@ -1275,7 +1275,8 @@ WAIT_PAY → CANCELLED
 
 ### 退款
 
-`FUTURE / FROZEN / NOT_IMPLEMENTED`：重复退款不得重复执行有效业务副作用。
+`CURRENT / FROZEN / IMPLEMENTED / VERIFIED`：重复退款返回幂等成功，不得再次
+执行 Ticket 或 Inventory mutation。
 
 ```text
 PAID → REFUNDED
@@ -1617,6 +1618,8 @@ POST /api/orders/{orderId}/pay
 
 POST /api/orders/{orderId}/cancel
 
+POST /api/orders/{orderId}/refund
+
 ```
 
 以上接口均要求 Bearer Token，并且只能查询或操作当前用户自己的 Order。不存在的
@@ -1642,8 +1645,35 @@ Timeout Scanner 以数据库为事实来源，按固定延迟扫描一批满足
 单个 Order 失败不会回滚或阻断同批其他候选，重复扫描和并发 Pay / Cancel / Timeout
 竞争最多产生一次终态迁移与一次库存副作用。
 
-Order 列表、退款与支付提供方集成仍属于后续 Batch；Ticket 同步签发及单票查询
-已在 Phase 7 实现。
+退款只允许 Order Owner 主动执行；`ADMIN` 不自动绕过 Ownership，Organizer 也不能
+代买家退款，但 `ADMIN` 本身是 Order Owner 时可正常执行。接口要求 validated JWT
+principal、无 Request Body；成功响应只包含 `orderId` 与 `status=REFUNDED`。
+
+退款窗口严格为 `refundTime < sessionStartAt`。当 `refundTime >= sessionStartAt`
+时返回 `ORDER_REFUND_WINDOW_CLOSED`；不附加 grace period、`saleEndAt` 或
+`sessionEndAt` 规则。Order 以 `READ_COMMITTED` 本地事务拥有该流程，写入顺序为
+Order `PAID -> REFUNDED`、Ticket `VALID -> REFUNDED`、Inventory
+`sold_stock -> available_stock`，Ticket 与 Inventory 均以 `MANDATORY` 加入。
+`USED` Ticket 返回 `ORDER_REFUND_TICKET_USED`。
+
+退款正确性依赖 expected-state Conditional UPDATE、affected rows、InnoDB row
+serialization、单一 MySQL 本地事务和数据库约束，而不是 JVM/Redis lock 或
+distributed transaction。重复退款观察到 `REFUNDED` 后返回幂等成功，不再次执行
+Ticket/Inventory mutation。并发 winner commit 时 loser 观察 `REFUNDED`；winner
+rollback 时等待事务会重新评估已提交的 `PAID` 并可成为新 winner。真实 MySQL
+row-lock wait 与 rollback handoff 已通过验证。
+
+公共 Refund 错误词汇为 `ORDER_NOT_FOUND`、`ORDER_NOT_REFUNDABLE`、
+`ORDER_REFUND_WINDOW_CLOSED` 和 `ORDER_REFUND_TICKET_USED`。Participant 内部失败
+不构成 HTTP Contract。Order 列表与支付提供方集成仍属于后续 Batch；Ticket 同步
+签发及单票查询已在 Phase 7 实现。
+
+Refund 恢复一份 sold Inventory，但 V3 继续让 `REFUNDED` 的
+`purchase_guard = 1`，并保留同一 User/Session Ticket，因此不恢复同场次购买资格。
+Refund Foundation 不等于财务结算集成：真实 payment-provider refund、money
+transfer、provider webhook/callback、MQ async refund、Notification、refund reason、
+partial refund、Organizer/Admin forced refund、customer-service refund，以及 FLASH /
+WaitingList 均未实现。
 
 ---
 
@@ -1684,8 +1714,12 @@ App 层 `CheckInApplicationService` 捕获一次 UTC 微秒时间并持有
 classification。因此 non-owner 即使 Ticket 已 USED 或窗口已关闭仍返回 404；Owner
 的 USED Ticket 在关闭窗口返回 `TICKET_CHECK_IN_CLOSED`，在合法窗口返回
 `TICKET_ALREADY_USED`。成功响应为 HTTP 200，且仅包含 `ticketNo`、`sessionId`、
-`status`。Ticket 列表 `GET /api/tickets` 仍属于 Future；退款 Ticket state、失效方式
-以及 Refund 与 Check-in 的交互仍未冻结。
+`status`。Phase 9 增加 Ticket `VALID -> REFUNDED`，与 Check-in 的
+`VALID -> USED` 通过数据库 Conditional UPDATE 竞争。对 `REFUNDED` Ticket：
+non-owner 返回 `TICKET_NOT_FOUND`；Owner 在开始前返回
+`TICKET_CHECK_IN_NOT_STARTED`，合法窗口返回 `TICKET_REFUNDED`，关闭窗口返回
+`TICKET_CHECK_IN_CLOSED`，继续保持 Resource/Ownership hiding → Time Window →
+mutation/status classification 的优先级。Ticket 列表 `GET /api/tickets` 仍属于 Future。
 
 ---
 
@@ -1715,8 +1749,11 @@ eventhub-app/application
 ```
 
 建立命名明确的 ApplicationService。当前 Phase 6 NORMAL Order Lifecycle 是窄
-例外，由 `eventhub-order` 拥有 Reserve / Pay / Cancel / Timeout 事务编排。
-Refund 与 WaitingList 的事务所有者尚未冻结，下列名称不得作为硬性要求：
+例外，由 `eventhub-order` 拥有 Reserve / Pay / Cancel / Timeout 事务编排；Phase 7
+Pay-to-Ticket 与 Phase 9 Refund 是同一生命周期的窄扩展。Refund 由
+`eventhub-order` 持有事务，不建立 App-owned `RefundApplicationService`。这些例外
+不构成其他跨领域流程的通用先例。WaitingList 的事务所有者尚未冻结，下列名称
+不得作为硬性要求：
 
 ```text
 ReservationApplicationService
@@ -1888,10 +1925,10 @@ MySQL条件UPDATE库存
 
 Phase 6 Batch 2 已完成 NORMAL Reservation 与 `WAIT_PAY` Order；Batch 3 已完成
 Owner-only Order Query、同步 Pay 与主动 Cancel；Batch 4 已完成数据库驱动的有界
-Timeout Scanner。Phase 7 已在 Pay 中同步签发 Ticket。以下能力保留到后续 Batch：
+Timeout Scanner。Phase 7 已在 Pay 中同步签发 Ticket，Phase 9 已完成 Refund
+Foundation。以下能力保留到后续 Batch：
 
 ```text
-退款
 支付提供方集成
 
 ```
@@ -2196,7 +2233,7 @@ Outbox
 ## P1 —— 尽量完成
 
 ```text
-退款
+退款（Phase 9 Refund Foundation 已完成；财务结算集成仍未实现）
 候补
 缓存击穿
 JWT Immediate Revocation / Blacklist（Phase 5 不实现，未来按需评估）

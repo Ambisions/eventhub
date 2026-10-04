@@ -1,6 +1,7 @@
 package com.eventhub.controller.order;
 
 import com.eventhub.controller.order.dto.OrderResponse;
+import com.eventhub.controller.order.dto.RefundResponse;
 import com.eventhub.order.api.OrderCommandApi;
 import com.eventhub.order.api.OrderQueryApi;
 import com.eventhub.order.api.model.PaymentResult;
@@ -43,5 +44,12 @@ public final class OrderController {
             @AuthenticationPrincipal EventHubAuthenticatedUser currentUser,
             @PathVariable long orderId) {
         return OrderResponse.from(orderCommandApi.cancel(currentUser.userId(), orderId));
+    }
+
+    @PostMapping("/{orderId}/refund")
+    public RefundResponse refund(
+            @AuthenticationPrincipal EventHubAuthenticatedUser currentUser,
+            @PathVariable long orderId) {
+        return RefundResponse.from(orderCommandApi.refund(currentUser.userId(), orderId));
     }
 }

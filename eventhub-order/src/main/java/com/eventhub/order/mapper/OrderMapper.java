@@ -26,6 +26,11 @@ public interface OrderMapper extends BaseMapper<OrderEntity> {
             @Param("orderId") long orderId,
             @Param("userId") long userId);
 
+    int markRefundedIfPaid(
+            @Param("orderId") long orderId,
+            @Param("userId") long userId,
+            @Param("sessionId") long sessionId);
+
     List<Long> findExpiredWaitPayIds(
             @Param("scanNow") LocalDateTime scanNow,
             @Param("batchSize") int batchSize);

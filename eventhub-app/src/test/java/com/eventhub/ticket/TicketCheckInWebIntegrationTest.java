@@ -222,6 +222,44 @@ class TicketCheckInWebIntegrationTest {
     }
 
     @Test
+    void preservesOwnershipAndTimePriorityForRefundedTickets() throws Exception {
+        long ownerId = nextId();
+        String ownerToken = bearerToken(ownerId, UserRole.USER);
+        LocalDateTime start = WINDOW_TIME.minusHours(1);
+        LocalDateTime end = WINDOW_TIME.plusHours(1);
+
+        Fixture nonOwner = fixture(ownerId, nextId(), "REFUNDED", start, end);
+        assertCheckInError(
+                nonOwner.ticketNo(), bearerToken(nextId(), UserRole.USER),
+                HttpStatus.NOT_FOUND, "TICKET_NOT_FOUND");
+
+        Fixture before = fixture(ownerId, nextId(), "REFUNDED", WINDOW_TIME.plusHours(1), end.plusHours(1));
+        assertCheckInError(
+                before.ticketNo(), ownerToken,
+                HttpStatus.CONFLICT, "TICKET_CHECK_IN_NOT_STARTED");
+
+        Fixture legal = fixture(ownerId, nextId(), "REFUNDED", start, end);
+        assertCheckInError(
+                legal.ticketNo(), ownerToken,
+                HttpStatus.CONFLICT, "TICKET_REFUNDED");
+
+        Fixture closed = fixture(ownerId, nextId(), "REFUNDED", start, end);
+        checkInClock.setInstant(WINDOW_INSTANT.plusSeconds(3_600));
+        assertCheckInError(
+                closed.ticketNo(), ownerToken,
+                HttpStatus.CONFLICT, "TICKET_CHECK_IN_CLOSED");
+        checkInClock.setInstant(WINDOW_INSTANT.plusSeconds(3_601));
+        assertCheckInError(
+                closed.ticketNo(), ownerToken,
+                HttpStatus.CONFLICT, "TICKET_CHECK_IN_CLOSED");
+
+        assertThat(ticketStatus(nonOwner.ticketNo())).isEqualTo("REFUNDED");
+        assertThat(ticketStatus(before.ticketNo())).isEqualTo("REFUNDED");
+        assertThat(ticketStatus(legal.ticketNo())).isEqualTo("REFUNDED");
+        assertThat(ticketStatus(closed.ticketNo())).isEqualTo("REFUNDED");
+    }
+
+    @Test
     void keepsSecuritySurfaceNarrowAndPreservesOwnerQuery() throws Exception {
         long ticketOwnerId = nextId();
         Fixture fixture = fixture(

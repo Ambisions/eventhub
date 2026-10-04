@@ -77,6 +77,7 @@ public class CheckInApplicationService {
             CheckInErrorCode errorCode = switch (exception.getFailure()) {
                 case NOT_FOUND -> CheckInErrorCode.TICKET_NOT_FOUND;
                 case ALREADY_USED -> CheckInErrorCode.TICKET_ALREADY_USED;
+                case REFUNDED -> CheckInErrorCode.TICKET_REFUNDED;
             };
             throw externalFailure(errorCode, exception);
         }

@@ -56,6 +56,16 @@
           AND status = 'WAIT_PAY'
     </update>
 
+    <update id="markRefundedIfPaid">
+        UPDATE ticket_order
+        SET status = 'REFUNDED',
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE id = #{orderId}
+          AND user_id = #{userId}
+          AND session_id = #{sessionId}
+          AND status = 'PAID'
+    </update>
+
     <select id="findExpiredWaitPayIds" resultType="java.lang.Long">
         SELECT id
         FROM ticket_order

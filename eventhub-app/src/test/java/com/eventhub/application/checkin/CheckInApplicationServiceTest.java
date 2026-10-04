@@ -152,6 +152,15 @@ class CheckInApplicationServiceTest {
     }
 
     @Test
+    void translatesRefundedTicket() {
+        givenTarget();
+        when(ticketCheckInCommandApi.checkIn(TICKET_NO, SESSION_ID))
+                .thenThrow(new TicketCheckInException(TicketCheckInFailure.REFUNDED));
+
+        assertExternalFailure(CheckInErrorCode.TICKET_REFUNDED);
+    }
+
+    @Test
     void preservesUnknownRuntimeFailure() {
         IllegalStateException failure = new IllegalStateException("synthetic unexpected failure");
         when(ticketCheckInQueryApi.resolveTarget(TICKET_NO)).thenThrow(failure);

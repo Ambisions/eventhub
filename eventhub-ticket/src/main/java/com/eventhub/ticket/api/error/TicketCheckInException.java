@@ -17,6 +17,7 @@ public final class TicketCheckInException extends RuntimeException {
         return switch (failure) {
             case NOT_FOUND -> "Ticket not found";
             case ALREADY_USED -> "Ticket has already been used";
+            case REFUNDED -> "Ticket has been refunded";
         };
     }
 }

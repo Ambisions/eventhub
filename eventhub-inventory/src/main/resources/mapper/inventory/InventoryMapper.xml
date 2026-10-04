@@ -61,4 +61,13 @@
         WHERE session_id = #{sessionId}
           AND locked_stock &gt; 0
     </update>
+
+    <update id="refundSoldOne">
+        UPDATE event_inventory
+        SET sold_stock = sold_stock - 1,
+            available_stock = available_stock + 1,
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE session_id = #{sessionId}
+          AND sold_stock &gt; 0
+    </update>
 </mapper>

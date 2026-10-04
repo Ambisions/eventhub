@@ -19,13 +19,13 @@
 - TicketOrder
 - NORMAL Reserve 与 `WAIT_PAY` 订单创建
 - 支付、取消、超时状态转换
+- 退款 `PAID → REFUNDED`
 - 订单状态机
-- NORMAL Reserve / Pay / Cancel / Timeout 的本地事务编排
+- NORMAL Reserve / Pay / Cancel / Timeout、Pay-to-Ticket 与 Refund 的本地事务编排
 
-未来 `PAID → REFUNDED`、退款幂等与 `sold → available` 为
-`FUTURE / FROZEN / NOT_IMPLEMENTED`；FLASH 的 Lua → Reservation → Outbox →
-RabbitMQ → Consumer → MySQL 主链路及 At-Least-Once + Idempotent Consumer 也为
-`FUTURE / FROZEN / NOT_IMPLEMENTED`。Refund 事务所有者、Reservation 精确
+Refund Foundation 为 `CURRENT / FROZEN / IMPLEMENTED`。FLASH 的 Lua →
+Reservation → Outbox → RabbitMQ → Consumer → MySQL 主链路及 At-Least-Once +
+Idempotent Consumer 仍为 `FUTURE / FROZEN / NOT_IMPLEMENTED`；Reservation 精确
 持久化模型 / `reservation_id`、消息拓扑与精确幂等 Key 尚未冻结。
 
 本模块不负责：
@@ -39,7 +39,8 @@ RabbitMQ → Consumer → MySQL 主链路及 At-Least-Once + Idempotent Consumer
 
 跨领域流程默认由 `eventhub-app` 的 ApplicationService 编排。当前 Phase 6
 NORMAL Order Lifecycle 是已冻结窄例外，由本模块拥有 Reserve、Pay、Cancel、
-Timeout 的事务编排。
+Timeout 的事务编排；Phase 7 Pay-to-Ticket 与 Phase 9 Refund 是该生命周期的
+冻结窄扩展，不构成其他跨领域流程的通用先例。
 
 ---
 
@@ -53,21 +54,17 @@ Timeout 的事务编排。
 
 `WAIT_PAY → CLOSED`
 
-未来已冻结但尚未实现的转换：
+`PAID → REFUNDED`
 
-`PAID → REFUNDED`（`FUTURE / FROZEN / NOT_IMPLEMENTED`）
-
-Phase 3 第一版 Schema Baseline 只包含
-`WAIT_PAY`、`PAID`、`CLOSED`、`CANCELLED`；实现退款前必须通过新
-Migration 扩展状态 `CHECK`，并重新评估 `purchase_guard` 和 Ticket
-唯一约束，不能把后续语义倒灌进第一版 Migration。
+Phase 3 第一版 Schema Baseline 只包含 `WAIT_PAY`、`PAID`、`CLOSED`、
+`CANCELLED`；Phase 9 V3 通过新 Migration 加入 `REFUNDED` 并更新 generated
+`purchase_guard`，没有修改历史 Migration。
 
 当前持久终态：
 
 - `CANCELLED`
 - `CLOSED`
-
-未来 `REFUNDED` 为退款终态，但不是当前持久状态。
+- `REFUNDED`
 
 禁止未定义状态转换，例如：
 
@@ -188,8 +185,7 @@ V1 可以使用：
 
 # 6. 退款规则
 
-本节为 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的业务 Contract，不描述当前
-Production behavior。
+本节描述 `CURRENT / FROZEN / IMPLEMENTED` 的 Refund Foundation。
 
 退款只允许：
 
@@ -226,8 +222,14 @@ Production behavior。
 
 两者不是同一个业务概念。
 
-Refund API、事务所有者、Ticket 精确退款状态 / 失效方式与 MQ 集成仍为
-`FUTURE / NOT_YET_FROZEN / NOT_IMPLEMENTED`。
+只有 Order Owner 可以主动退款；ADMIN 不自动绕过 Ownership。退款只允许在
+`refundTime < sessionStartAt` 时进行，`USED` Ticket 不可退款。Order 以
+`READ_COMMITTED` 持有本地事务，写入顺序固定为
+`Order → Ticket → Inventory`；Ticket 和 Inventory mutation 均以 `MANDATORY`
+参与。重复退款观察到 `REFUNDED` 后幂等成功，不再次执行参与者 mutation。
+
+V3 使 `REFUNDED` 的 `purchase_guard` 保持为 `1`。真实支付提供方退款、资金划转、
+回调、MQ/Notification、退款原因、部分退款与强制退款不属于当前 Foundation。
 
 ---
 
@@ -246,8 +248,9 @@ Inventory 负责：
 `available → locked`、`locked → sold` 或 `locked → available`。Inventory mutation
 以 `MANDATORY` 加入外层事务。
 
-未来 Refund 的事务所有者尚未冻结；不得预设 `RefundApplicationService`、
-Order Service 或 Ticket Service 为所有者。
+Phase 9 Refund 由 Order Service 以 `READ_COMMITTED` 持有事务，按
+`Order → Ticket → Inventory` 调用公开 API；Ticket 与 Inventory 以 `MANDATORY`
+参与，任何 participant 失败都回滚整个 Refund。
 
 Order 模块不得直接访问 Inventory 的：
 
@@ -396,7 +399,8 @@ Phase 3 Baseline 中 `ticket_order` 至少保持：
 `UNIQUE(user_id, session_id, purchase_guard)`
 
 其中 generated `purchase_guard` 用于阻止同一用户、同一 Session 的重复
-`WAIT_PAY` / `PAID` Order，同时允许 `CLOSED` / `CANCELLED` 后重新下单。
+`WAIT_PAY` / `PAID` / `REFUNDED` Order，同时只允许 `CLOSED` / `CANCELLED`
+后重新下单。
 
 FLASH Reservation concept 已冻结，但精确持久化字段与数据库唯一安全线尚未
 冻结；不得提前要求 `UNIQUE(reservation_id)`。
@@ -477,7 +481,8 @@ Redis、RabbitMQ、MySQL 之间出现异常时，
 4. MQ 重复消费是否安全（未来 FLASH）。
 5. 已冻结的未来业务 Key 是否仍能保证唯一业务结果；当前不得预设 `reservationId`。
 6. 失败路径是否可能产生部分成功。
-7. 跨模块副作用是否由对应 Frozen transaction owner 正确编排；当前 NORMAL 为 Order Service。
+7. 跨模块副作用是否由对应 Frozen transaction owner 正确编排；当前 NORMAL、
+   Pay-to-Ticket 与 Refund 的窄例外由 Order Service 持有事务。
 8. 数据库唯一约束是否仍然有效。
 
 ---
@@ -494,10 +499,12 @@ Redis、RabbitMQ、MySQL 之间出现异常时，
 - 重复取消
 - 支付与取消竞争
 - 支付与超时竞争
+- `PAID → REFUNDED`
+- 重复退款
+- Refund 与 Check-in 竞争
 
-未来 Refund / FLASH / MQ / Outbox 进入实际实现 Scope 后，才按届时冻结的
-Contract 增加 `PAID → REFUNDED`、重复退款、重复消息、Consumer、业务 Key
-幂等与 Outbox 重复发送测试。
+未来 FLASH / MQ / Outbox 进入实际实现 Scope 后，再按届时冻结的 Contract
+增加重复消息、Consumer、业务 Key 幂等与 Outbox 重复发送测试。
 
 至少必须证明：
 

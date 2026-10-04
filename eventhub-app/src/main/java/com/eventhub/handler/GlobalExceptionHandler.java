@@ -127,7 +127,8 @@ public final class GlobalExceptionHandler {
         return switch (errorCode) {
             case ORDER_NOT_FOUND -> HttpStatus.NOT_FOUND;
             case ACTIVE_PURCHASE_EXISTS, SALE_NOT_STARTED, SALE_ENDED,
-                    ORDER_EXPIRED, ORDER_STATE_CONFLICT -> HttpStatus.CONFLICT;
+                    ORDER_EXPIRED, ORDER_STATE_CONFLICT, ORDER_NOT_REFUNDABLE,
+                    ORDER_REFUND_WINDOW_CLOSED, ORDER_REFUND_TICKET_USED -> HttpStatus.CONFLICT;
         };
     }
 
@@ -142,7 +143,8 @@ public final class GlobalExceptionHandler {
     private static HttpStatus statusFor(CheckInErrorCode errorCode) {
         return switch (errorCode) {
             case TICKET_NOT_FOUND -> HttpStatus.NOT_FOUND;
-            case TICKET_CHECK_IN_NOT_STARTED, TICKET_CHECK_IN_CLOSED, TICKET_ALREADY_USED ->
+            case TICKET_CHECK_IN_NOT_STARTED, TICKET_CHECK_IN_CLOSED, TICKET_ALREADY_USED,
+                    TICKET_REFUNDED ->
                     HttpStatus.CONFLICT;
         };
     }
