@@ -18,10 +18,12 @@
 - Session 库存
 - 库存初始化、锁定、释放和 Refund `sold → available` mutation
 
-未来方向中，FLASH Redis 高并发库存、Lua 原子 Reservation 与 Fail Fast 是
-`FUTURE / FROZEN / NOT_IMPLEMENTED`；WaitingList 与限流 capability 为
-`FUTURE / PLANNED / NOT_IMPLEMENTED`。Reservation 精确持久化模型、
-`reservation_id`、WaitingList Schema / ZSet / 资格时长与约束尚未冻结。
+Phase 10 的 FLASH admission stock、Lua 原子 mutation、Redis-derived admission
+state 与新请求 Fail Fast / Fail Closed 为 `CURRENT PHASE / FROZEN DESIGN /
+NOT_IMPLEMENTED`。Fixed Window Rate Limit 与 WaitingList 为 `FUTURE /
+PLANNED / NOT_IMPLEMENTED` 的流量治理能力，不是 Phase 10 correctness
+requirement。未来异步 Reservation 精确持久化模型、`reservation_id`、
+WaitingList Schema / ZSet / 资格时长与约束尚未冻结。
 
 本模块不负责：
 
@@ -133,9 +135,9 @@ MySQL 条件 UPDATE 负责 NORMAL 模式下的原子库存竞争控制。
 
 # 5. FLASH 抢票规则
 
-本节描述 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的 FLASH 核心方向，不是当前
-Production behavior。Reservation business concept 已冻结，但精确持久化模型、
-字段与 `reservation_id` 尚未冻结。
+本节描述 Phase 10 `CURRENT PHASE / FROZEN DESIGN / NOT_IMPLEMENTED` 的 FLASH
+admission 核心方向，不是当前 Production behavior。未来异步 Reservation 的精确
+持久化模型、字段与 `reservation_id` 尚未冻结。
 
 FLASH 模式使用 Redis 作为高并发库存执行层。
 
@@ -153,7 +155,12 @@ Redis Command
 → Java 判断
 → Redis Command
 
-FLASH 抢票原子过程需要保持以下状态的一致变化：
+Phase 10 FLASH admission 原子过程只负责 admission stock、售票条件、重复准入
+和 Redis-derived admission state 的一致变化；MySQL Inventory 继续是权威库存
+事实。未来引入 persistent Reservation / purchased 等模型时，再按届时冻结的
+Contract 扩展状态边界。
+
+未来完整流程可能需要保持以下状态的一致变化：
 
 - 历史购买资格检查
 - 当前 Reservation 检查
@@ -193,9 +200,10 @@ Redis 在本模块中承担：
 
 - FLASH 高并发执行
 - 抢票库存状态
-- 临时 Reservation 状态
-- WaitingList
-- 限流
+- Phase 10 Redis-derived admission state
+- Future 临时 Reservation 状态
+- Future WaitingList
+- Future Rate Limit
 
 Redis 中的状态不得被视为永久最终事实。
 
@@ -277,7 +285,8 @@ Inventory Contract。
 
 # 11. 限流
 
-FLASH 请求顺序至少保持：
+Fixed Window Rate Limit 是 future traffic hardening / anti-abuse capability，不是
+Phase 10 FLASH correctness requirement。未来引入时，请求顺序应保持：
 
 用户级限流
 → Session 级限流
@@ -291,9 +300,11 @@ Session 级维度：
 
 `sessionId`
 
-V1 使用：
+Future Proposal：
 
-Redis Lua Fixed Window
+Redis Lua Fixed Window Rate Limit
+
+Current Phase 10：`NOT CURRENT REQUIREMENT`，不属于 Phase 10 completion criteria。
 
 限流阈值必须配置化。
 
@@ -399,7 +410,7 @@ Redis 原子性是否仍然成立。
 - Redis 故障路径
 - WaitingList 重复加入
 - WaitingList 资格过期
-- Rate Limit 边界
+- Rate Limit 边界（仅当该 future capability 进入当前 Scope）
 
 NORMAL 抢票至少需要证明：
 

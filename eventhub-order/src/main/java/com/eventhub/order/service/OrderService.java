@@ -71,7 +71,7 @@ public class OrderService implements ReservationApi, OrderQueryApi, OrderCommand
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrderView reserve(long userId, long sessionId) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");

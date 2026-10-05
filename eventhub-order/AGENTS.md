@@ -17,16 +17,20 @@
 `eventhub-order` 当前负责：
 
 - TicketOrder
-- NORMAL Reserve 与 `WAIT_PAY` 订单创建
+- NORMAL Reserve 与 Phase 10 FLASH 同步 `WAIT_PAY` 订单创建
 - 支付、取消、超时状态转换
 - 退款 `PAID → REFUNDED`
 - 订单状态机
-- NORMAL Reserve / Pay / Cancel / Timeout、Pay-to-Ticket 与 Refund 的本地事务编排
+- NORMAL Reserve / Phase 10 FLASH Reserve / Pay / Cancel / Timeout、Pay-to-Ticket
+  与 Refund 的本地事务编排
 
-Refund Foundation 为 `CURRENT / FROZEN / IMPLEMENTED`。FLASH 的 Lua →
-Reservation → Outbox → RabbitMQ → Consumer → MySQL 主链路及 At-Least-Once +
-Idempotent Consumer 仍为 `FUTURE / FROZEN / NOT_IMPLEMENTED`；Reservation 精确
-持久化模型 / `reservation_id`、消息拓扑与精确幂等 Key 尚未冻结。
+Refund Foundation 为 `CURRENT / FROZEN / IMPLEMENTED`。Phase 10 FLASH 当前冻结
+路径为 App 完成 Redis admission 后调用 `ReservationApi.reserveFlash(...)`，由本
+模块完成 authoritative session / mode validation、sale window、`WAIT_PAY` 创建、
+Inventory lock 与本地事务。Outbox → RabbitMQ → Consumer 的异步订单链路及
+At-Least-Once + Idempotent Consumer 仍为 `FUTURE / FROZEN / NOT_IMPLEMENTED`；
+未来异步 Reservation 精确持久化模型 / `reservation_id`、消息拓扑与精确幂等
+Key 尚未冻结。
 
 本模块不负责：
 
@@ -248,6 +252,10 @@ Inventory 负责：
 `available → locked`、`locked → sold` 或 `locked → available`。Inventory mutation
 以 `MANDATORY` 加入外层事务。
 
+Phase 10 FLASH 复用当前 Reservation MySQL 写入语义，顺序固定为：Session load
+→ expected sale mode gate → sale-window validation → Order INSERT → Inventory
+`lockOne` → Order reload → COMMIT。不得改成 Inventory first → Order second。
+
 Phase 9 Refund 由 Order Service 以 `READ_COMMITTED` 持有事务，按
 `Order → Ticket → Inventory` 调用公开 API；Ticket 与 Inventory 以 `MANDATORY`
 参与，任何 participant 失败都回滚整个 Refund。
@@ -263,19 +271,19 @@ Order 模块不得直接访问 Inventory 的：
 
 # 8. Reservation
 
-Reservation business concept 属于 `FUTURE / FROZEN / NOT_IMPLEMENTED`；精确
-DB 表、字段、状态持久化模型、`reservation_id` 与幂等 Key 为
-`FUTURE / NOT_YET_FROZEN / NOT_IMPLEMENTED`。
+当前 Public API ownership 已冻结：
 
-Reservation 表示：
+- `ReservationApi.reserve(...)` = NORMAL Reservation Contract
+- `ReservationApi.reserveFlash(...)` = Phase 10 FLASH Reservation Contract
 
-异步抢票请求及其处理过程。
+两者都创建现有 `WAIT_PAY` TicketOrder；FLASH 通过 expected sale mode gate 进入
+同一套权威 MySQL Reservation 写入语义。Order 模块不操作 Redis Lua、Redis Key、
+FLASH preparation 或 post-commit Redis lifecycle orchestration。
 
-TicketOrder 表示：
-
-最终订单事实。
-
-两者不得混为同一业务对象。
+未来 RabbitMQ 异步链路中的 persistent Reservation business concept 仍为
+`FUTURE / FROZEN / NOT_IMPLEMENTED`；精确 DB 表、字段、状态持久化模型、
+`reservation_id` 与幂等 Key 为 `FUTURE / NOT_YET_FROZEN / NOT_IMPLEMENTED`。
+它不得与当前最终 TicketOrder 事实混为同一业务对象。
 
 以下状态仅为未来方向示例，不构成当前持久化模型 Freeze：
 
@@ -283,21 +291,24 @@ TicketOrder 表示：
 - `SUCCESS`
 - `FAILED`
 
-相同业务请求的重复处理不得创建多个有效 Reservation / Order 结果；具体业务
-标识与约束在 FLASH 实现阶段冻结。
+相同业务请求的重复处理不得创建多个有效 persistent Reservation / Order 结果；
+具体业务标识与约束留待未来异步 FLASH 实现阶段冻结。
 
 ---
 
 # 9. FLASH 创建订单幂等
 
-本节主链路为 `FUTURE / FROZEN / NOT_IMPLEMENTED`。Reservation 精确持久化
-模型、`reservation_id` 与精确幂等 Key 尚未冻结。
+Phase 10 当前链路为：App 完成 Redis Lua Admission →
+`ReservationApi.reserveFlash(...)` → 同步 MySQL `WAIT_PAY` transaction。数据库
+现有 active-purchase unique constraint 继续作为最终安全线；Order 不增加
+select-before-insert correctness mechanism。
 
-FLASH 核心链路：
+以下 RabbitMQ 主链路保留为 `FUTURE / FROZEN / NOT_IMPLEMENTED`。Reservation
+精确持久化模型、`reservation_id` 与精确幂等 Key 尚未冻结：
 
 Redis Lua
-→ Reservation
-→ RabbitMQ
+→ persistent Reservation / Outbox
+→ reliable messaging / RabbitMQ
 → Order Consumer
 → MySQL
 
@@ -503,8 +514,10 @@ Redis、RabbitMQ、MySQL 之间出现异常时，
 - 重复退款
 - Refund 与 Check-in 竞争
 
-未来 FLASH / MQ / Outbox 进入实际实现 Scope 后，再按届时冻结的 Contract
-增加重复消息、Consumer、业务 Key 幂等与 Outbox 重复发送测试。
+Phase 10 FLASH 进入实际实现 Scope 后，应验证 expected mode gate、现有 MySQL
+写入顺序、同步 `WAIT_PAY` 结果及 Redis/MySQL 失败协调。未来 MQ / Outbox 进入
+Scope 后，再按届时冻结的 Contract 增加重复消息、Consumer、业务 Key 幂等与
+Outbox 重复发送测试。
 
 至少必须证明：
 

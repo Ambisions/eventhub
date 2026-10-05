@@ -576,8 +576,9 @@ Inventory
 库存锁定
 库存释放
 
-Future Frozen：FLASH Redis库存、Lua atomic reservation
-Future Planned：WaitingList、限流
+Phase 10 Current / Frozen Design：FLASH admission stock、Lua atomic mutation、
+Redis-derived admission state
+Future Planned：WaitingList、Fixed Window Rate Limit 等流量治理
 
 ```
 
@@ -596,8 +597,10 @@ Future Planned：WaitingList、限流
 订单状态机
 
 Current Frozen / Implemented：Order-owned Refund Foundation
-Future Frozen：FLASH Reservation concept、Outbox/RabbitMQ direction
-Not Yet Frozen：Reservation persistence model、exact MQ contract
+Phase 10 Current / Frozen Design：`ReservationApi.reserveFlash(...)` 同步创建
+`WAIT_PAY`，Order 持有权威 MySQL transaction
+Future Frozen：异步 Reservation concept、Outbox/RabbitMQ direction
+Not Yet Frozen：persistent Reservation model、exact MQ contract
 
 ```
 
@@ -843,33 +846,107 @@ SELECT FOR UPDATE
 
 # 12. FLASH 高并发抢票流程
 
-以下核心链路为 `FUTURE / FROZEN / NOT_IMPLEMENTED`：
+Phase 10 当前链路为 `CURRENT PHASE / FROZEN DESIGN / NOT_IMPLEMENTED`：
 
 ```text
 User
  ↓
 JWT
  ↓
-用户限流
+App ApplicationService
  ↓
-Session限流
+Redis Lua Admission
  ↓
-Redis Lua
+ReservationApi.reserveFlash(...)
  ↓
-Reservation
+synchronous MySQL Reservation
  ↓
-Outbox
- ↓
-RabbitMQ
- ↓
-Order Consumer
- ↓
-MySQL
+WAIT_PAY
 
 ```
 
-Reservation business concept 已冻结；精确持久化模型、字段、`reservation_id`
-与幂等 Key 尚未冻结。以下返回值与查询路径仅为
+当前模块 Public API ownership 固定为：
+
+- `ReservationApi.reserve(...)` = NORMAL Reservation Contract
+- `ReservationApi.reserveFlash(...)` = FLASH Reservation Contract
+- `OrderCommandApi` 继续负责 Pay / Cancel / Refund，不承载 Reserve
+
+Session `saleMode` 的兼容语义固定为：Create omitted / `null` → `NORMAL`；
+Update omitted / `null` → 保留当前值。只有所属 Event 为 `DRAFT` / `REJECTED`
+时允许修改。
+
+Phase 10 不重排 Phase 6 已验证的 Reservation transaction，写序固定为：
+
+```text
+Session load
+→ expected saleMode gate
+→ sale-window validation
+→ Order INSERT
+→ Inventory lockOne
+→ reload Order
+→ COMMIT
+```
+
+Phase 10 对已经成功创建的 FLASH `WAIT_PAY` Order 冻结以下 lifecycle
+同步矩阵；该矩阵当前为 `FROZEN DESIGN / NOT_IMPLEMENTED`：
+
+```text
+Pay:
+MySQL WAIT_PAY → PAID
+Redis mutation: NONE
+
+Cancel:
+MySQL WAIT_PAY → CANCELLED
+MySQL COMMIT first → Redis RELEASE
+
+Timeout:
+MySQL WAIT_PAY → CLOSED
+per-order MySQL COMMIT first → Redis RELEASE
+
+Refund:
+MySQL PAID → REFUNDED
+→ Ticket VALID → REFUNDED
+→ Inventory sold → available
+→ COMMIT
+→ Redis REFUND
+```
+
+`RELEASE` 仅允许把 `A:<expectedOrderId>` 删除并将 admission stock 恢复 `+1`；
+`REFUND` 仅允许把 `A:<expectedOrderId>` 转换为 `R:<expectedOrderId>` 并将
+admission stock 恢复 `+1`。两者都必须保留 expected-order fencing 与幂等语义。
+MySQL 始终是最终事实，Redis 只是 derived state；已提交 lifecycle operation 后的
+Redis failure 不得反转已提交的 MySQL 结果。Phase 10 不实现 automatic retry、
+MQ retry、DLQ 或 automatic reconciliation。
+
+Phase 10 当前不实现 RabbitMQ async order、Outbox、DLQ、automatic retry、
+virtual queue 或 Fixed Window Rate Limit；Rate Limit 保留为 future traffic
+hardening / anti-abuse capability。
+
+Phase 10 固定分为六个 Batch：
+
+1. READ-ONLY Contract Precheck + targeted Source-of-Truth reconciliation
+2. Sale Mode Foundation
+3. Redis Admission + Preparation Foundation
+4. FLASH Reservation Integration
+5. Lifecycle Synchronization
+6. Final Verification / Docs / Freeze
+
+Future evolution 保留为 `FUTURE / FROZEN / NOT_IMPLEMENTED`：
+
+```text
+Redis Lua Admission
+ ↓
+persistent Reservation / Outbox
+ ↓
+reliable messaging / RabbitMQ
+ ↓
+async order processing
+ ↓
+MySQL
+```
+
+Future persistent Reservation business concept 已冻结；精确持久化模型、字段、
+`reservation_id` 与幂等 Key 尚未冻结。以下返回值与查询路径仅为
 `FUTURE / PLANNED` 方向，不构成完整 HTTP Contract Freeze。
 
 接口方向可能首先返回：
@@ -894,9 +971,20 @@ GET /reservations/{reservationId}
 
 # 13. Redis 数据设计
 
-本节为未来设计候选。FLASH Redis + Lua atomic reservation 与 Fail Fast 是
-Future Frozen direction；具体 Key、Reservation model 以及 WaitingList
-implementation 尚未冻结。
+Phase 10 当前冻结两个 admission Key：
+
+```text
+eventhub:flash:{sessionId}:meta
+eventhub:flash:{sessionId}:admissions
+```
+
+four-script contract 会对同一 Session 的两个 Key 执行 multi-key Lua，故
+`{sessionId}` 是明确的 same-slot hash tag。该决定仅适用于 Phase 10，不把 hash
+tag 扩张成全部 Redis Key 的通用要求。Future persistent Reservation model 与
+WaitingList implementation 仍未冻结。
+
+以下 `eventhub:session:*` stock / occupied / purchased / reservation-map 结构保留为
+未来完整异步架构的设计候选，不是 Phase 10 当前冻结 Key。
 
 ## 普通缓存
 
@@ -965,7 +1053,11 @@ ZSet。
 
 # 14. 抢票 Lua 职责
 
-一次原子执行：
+Phase 10 four-script contract 只在 `meta` 与 `admissions` 两个 Key 内原子处理
+admission stock、售票条件、重复准入和 Redis-derived admission state。Lua 不创建
+Order，也不承担 MySQL transaction。
+
+以下完整 occupied / purchased / persistent Reservation 过程是未来演进候选：
 
 ```text
 检查是否已经购买
@@ -1204,7 +1296,8 @@ Fail Fast
 
 # 20. 限流
 
-FLASH 请求：
+Fixed Window Rate Limit 不属于 Phase 10 correctness requirement。以下用户级 /
+Session 级限流保留为 future traffic hardening / anti-abuse 设计：
 
 ```text
 JWT
@@ -1231,7 +1324,8 @@ sessionId
 
 ```
 
-V1 使用：
+Future Proposal（`NOT CURRENT PHASE 10 REQUIREMENT` / `NOT PART OF PHASE 10
+COMPLETION CRITERIA`）：
 
 ```text
 Redis Lua Fixed Window
@@ -1563,6 +1657,15 @@ Authority 也不构成对全部 Organizer Resource 的隐式 CRUD 权限。
 
 # 25. Reservation API
 
+当前 Module Public API：
+
+```text
+ReservationApi.reserve(...) = NORMAL
+ReservationApi.reserveFlash(...) = FLASH
+```
+
+`OrderCommandApi` 继续负责 Pay / Cancel / Refund，不承载 Reserve。
+
 NORMAL 当前接口：
 
 ```http
@@ -1573,7 +1676,7 @@ POST /api/sessions/{sessionId}/orders
 该接口需要 Bearer Token、无 Request Body，成功返回 `201 Created` 与当前
 `WAIT_PAY` Order；用户身份只来自 JWT Principal。
 
-FLASH 未来接口方向（`FUTURE / PLANNED`，完整 HTTP Contract 尚未冻结）：
+Future RabbitMQ 异步版本接口方向（`FUTURE / PLANNED`，完整 HTTP Contract 尚未冻结）：
 
 ```http
 POST /api/sessions/{sessionId}/reservations
@@ -1970,18 +2073,16 @@ stock >= 0
 活动详情缓存
 Session缓存
 
-stock
-occupied-users
-purchased-users
-reservation-map
+eventhub:flash:{sessionId}:meta
+eventhub:flash:{sessionId}:admissions
 
-库存预热
-抢票 Lua
-释放 Lua
-
-用户级基础限流
+FLASH preparation
+four-script admission lifecycle
 
 ```
+
+用户级 / Session 级 Fixed Window Rate Limit 保留为 future traffic hardening，
+不是 Phase 10 correctness requirement。
 
 FLASH：
 

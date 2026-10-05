@@ -12,10 +12,11 @@ description: >
 
 本 Skill 定义 EventHub Redis 相关任务的标准执行流程。
 
-FLASH 的 Redis + Lua atomic reservation 方向为
-`FUTURE / FROZEN / NOT_IMPLEMENTED`；Reservation 精确持久化模型、字段与
-`reservation_id` 尚未冻结。WaitingList capability 为 `FUTURE / PLANNED`，
-具体 Schema、ZSet、资格时长和约束尚未冻结。
+EventHub Phase 10 的 Redis Lua Admission → synchronous MySQL Reservation 方向为
+`CURRENT PHASE / FROZEN DESIGN / NOT_IMPLEMENTED`；未来异步 Reservation 的精确
+持久化模型、字段与 `reservation_id` 尚未冻结。WaitingList capability 为
+`FUTURE / PLANNED`，具体 Schema、ZSet、资格时长和约束尚未冻结。Fixed Window
+Rate Limit 同样属于 future traffic hardening，不是 Phase 10 correctness requirement。
 
 主要处理：
 
@@ -217,11 +218,21 @@ Java、Lua、测试和补偿逻辑必须共享相同 Key 语义。
 EventHub V1 不以 Redis Cluster 为架构前提，
 因此不要为了未来 Cluster 提前强制 Hash Tag / Slot 设计。
 
+EventHub Phase 10 存在一个项目级冻结例外：
+
+- `eventhub:flash:{sessionId}:meta`
+- `eventhub:flash:{sessionId}:admissions`
+
+Phase 10 的 four-script contract 会对同一 Session 的两个 Key 执行 multi-key Lua，
+因此 `{sessionId}` 是明确的 same-slot hash tag 决策。这不构成“所有 Redis Key
+都必须使用 hash tag”的通用规则。
+
 ---
 
 # 5. FLASH 的原子边界由 Lua 保证
 
-本节为 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的核心方向。
+本节原子边界适用于 Phase 10 `CURRENT PHASE / FROZEN DESIGN / NOT_IMPLEMENTED`
+的 Redis admission，并继续适用于后续 FLASH 演进。
 
 FLASH 不允许：
 
@@ -326,7 +337,8 @@ Redisson Distributed Lock
 
 # 9. 故障策略必须区分 NORMAL 与 FLASH
 
-FLASH Fail Fast 是 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的故障 Contract。
+FLASH Fail Fast / Fail Closed 是 Phase 10 `CURRENT PHASE / FROZEN DESIGN /
+NOT_IMPLEMENTED` 的新请求故障 Contract。
 
 NORMAL：
 

@@ -146,9 +146,11 @@ userId + sessionId
 
 sessionId
 
-V1 使用：
+Future Proposal：
 
-Redis Lua Fixed Window。
+Redis Lua Fixed Window Rate Limit。
+
+Current Phase 10：`NOT CURRENT REQUIREMENT`，不属于 Phase 10 completion criteria。
 
 判断与计数更新必须原子。
 

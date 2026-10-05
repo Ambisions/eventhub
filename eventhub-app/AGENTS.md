@@ -254,14 +254,20 @@ Order Service 在同一 Local Transaction 中：
 INSERT `WAIT_PAY` Order
 → Inventory Public API 执行 MySQL 条件 UPDATE
 
-FLASH：
+Phase 10 当前 FLASH：
 
-Redis Lua
-→ Reservation
-→ RabbitMQ
-→ 异步订单处理
+App ApplicationService
+→ Redis Lua Admission
+→ `ReservationApi.reserveFlash(...)`
+→ 同步 MySQL `WAIT_PAY` transaction
 
-不要为了代码复用把 NORMAL 和 FLASH 强行统一。
+App 负责 Redis admission 与 post-commit Redis lifecycle 编排；Order 模块负责
+authoritative session / mode validation、sale window、Order INSERT、Inventory lock
+及本地事务。Redis 与 MySQL 不构成同一个事务。
+
+RabbitMQ 异步订单处理保留为后续演进，不是 Phase 10 当前主链路。NORMAL 与
+FLASH 可以复用已冻结的 MySQL Reservation 实现，但必须通过 expected sale mode
+gate 保持两种入口并发控制语义分离。
 
 库存并发规则属于 Inventory，订单状态规则属于 Order。
 
@@ -447,8 +453,12 @@ CANCELLED + locked → available + 重复调用
 当前退款：
 REFUNDED + sold → available + 历史购买资格不恢复
 
-未来 FLASH（核心方向 `FUTURE / FROZEN / NOT_IMPLEMENTED`）：
-Redis + Lua + Reservation + Outbox + MQ + Consumer + 重复消息 + 失败恢复
+Phase 10 当前 FLASH（`FROZEN DESIGN / NOT_IMPLEMENTED`）：
+Redis Lua Admission + `ReservationApi.reserveFlash(...)` + 同步 MySQL `WAIT_PAY`
+以及 Redis/MySQL 失败协调与 lifecycle sync
+
+未来 FLASH 可靠性演进：
+Outbox + MQ + Consumer + 重复消息 + 失败恢复
 
 不要把 HTTP 200 当成完整业务正确性的证明。
 

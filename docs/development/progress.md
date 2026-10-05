@@ -567,6 +567,14 @@ Status: `COMPLETE / VERIFIED / FROZEN`
   `NO BLOCKING VERIFICATION GAP`.
 - V1/V2 migrations, Future Contract, and Governance remain unchanged; Phase 6 is now frozen.
 
+### Reservation Isolation Reconciliation
+
+Status: `COMPLETE / VERIFIED`
+
+- This is a Frozen Contract implementation alignment, not a new Phase.
+- `OrderService.reserve()` now uses explicit `READ_COMMITTED` transaction isolation.
+- Real MySQL verification proved the reservation isolation contract.
+
 ### Global Governance Reconciliation
 
 Status: `COMPLETE`
@@ -701,3 +709,23 @@ Status: `COMPLETE / VERIFIED / FROZEN`
 - Real MySQL row-lock waiting and rollback handoff were proven for concurrent Refund;
   the waiting transaction re-evaluated committed state after the winner rolled back.
 - Formal Reviewer and Phase-level Test Reviewer both passed with no blocking gap.
+
+## Phase 10 — FLASH Reservation Foundation
+
+Status: `IN PROGRESS`
+
+Design: `COMPLETE / FROZEN`
+
+### Batch 1 — Contract Precheck / Source-of-Truth Reconciliation
+
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+- Source-of-Truth Reconciliation: `COMPLETE`.
+- Global Frozen Contract Consistency Audit completed its targeted documentation
+  reconciliation; final read-only recheck remains pending.
+
+### Batch 2 — Sale Mode Foundation
+
+Precheck: `PASS`
+
+Implementation: `NOT STARTED`
