@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import com.eventhub.event.api.PublicEventQueryApi;
 import com.eventhub.event.api.model.EventSessionView;
+import com.eventhub.event.api.model.SessionSaleMode;
 import com.eventhub.inventory.api.InventoryReservationApi;
 import com.eventhub.inventory.api.InventoryRefundApi;
 import com.eventhub.inventory.api.error.InventoryErrorCode;
@@ -36,6 +37,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -85,6 +88,70 @@ class OrderServiceTest {
         order.verify(context.orderMapper()).insertWaitPay(any(OrderEntity.class));
         order.verify(context.inventoryReservationApi()).lockOne(SESSION_ID);
         order.verify(context.orderMapper()).selectOrderById(501L);
+    }
+
+    @Test
+    void exposesBothReservationEntryPointsWithExplicitReadCommittedTransactions() throws Exception {
+        assertEquals(Isolation.READ_COMMITTED,
+                OrderService.class.getMethod("reserve", long.class, long.class)
+                        .getAnnotation(Transactional.class).isolation());
+        assertEquals(Isolation.READ_COMMITTED,
+                OrderService.class.getMethod("reserveFlash", long.class, long.class)
+                        .getAnnotation(Transactional.class).isolation());
+    }
+
+    @Test
+    void reservesFlashSessionThroughTheSharedMysqlFlow() {
+        TestContext context = contextAt(FIXED_INSTANT);
+        when(context.publicEventQueryApi().getPublishedSession(SESSION_ID))
+                .thenReturn(session(SessionSaleMode.FLASH,
+                        RESERVATION_NOW, RESERVATION_NOW.plusHours(1)));
+        stubSuccessfulInsert(context.orderMapper());
+
+        var result = context.service().reserveFlash(USER_ID, SESSION_ID);
+
+        assertEquals(OrderStatus.WAIT_PAY, result.status());
+        assertEquals(1, context.clock().instantCalls());
+        InOrder order = inOrder(context.publicEventQueryApi(), context.orderMapper(),
+                context.inventoryReservationApi());
+        order.verify(context.publicEventQueryApi()).getPublishedSession(SESSION_ID);
+        order.verify(context.orderMapper()).insertWaitPay(any(OrderEntity.class));
+        order.verify(context.inventoryReservationApi()).lockOne(SESSION_ID);
+        order.verify(context.orderMapper()).selectOrderById(501L);
+    }
+
+    @Test
+    void rejectsNormalEntryForFlashBeforeClockWindowAndWrites() {
+        TestContext context = contextAt(FIXED_INSTANT);
+        when(context.publicEventQueryApi().getPublishedSession(SESSION_ID))
+                .thenReturn(session(SessionSaleMode.FLASH,
+                        RESERVATION_NOW.plusHours(1), RESERVATION_NOW.plusHours(2)));
+
+        OrderException exception = assertThrows(
+                OrderException.class,
+                () -> context.service().reserve(USER_ID, SESSION_ID));
+
+        assertEquals(OrderErrorCode.RESERVATION_MODE_MISMATCH, exception.getErrorCode());
+        assertEquals(0, context.clock().instantCalls());
+        verify(context.orderMapper(), never()).insertWaitPay(any());
+        verify(context.inventoryReservationApi(), never()).lockOne(anyLong());
+    }
+
+    @Test
+    void rejectsFlashEntryForNormalBeforeClockWindowAndWrites() {
+        TestContext context = contextAt(FIXED_INSTANT);
+        when(context.publicEventQueryApi().getPublishedSession(SESSION_ID))
+                .thenReturn(session(SessionSaleMode.NORMAL,
+                        RESERVATION_NOW.minusHours(1), RESERVATION_NOW.plusHours(1)));
+
+        OrderException exception = assertThrows(
+                OrderException.class,
+                () -> context.service().reserveFlash(USER_ID, SESSION_ID));
+
+        assertEquals(OrderErrorCode.RESERVATION_MODE_MISMATCH, exception.getErrorCode());
+        assertEquals(0, context.clock().instantCalls());
+        verify(context.orderMapper(), never()).insertWaitPay(any());
+        verify(context.inventoryReservationApi(), never()).lockOne(anyLong());
     }
 
     @Test
@@ -577,11 +644,19 @@ class OrderServiceTest {
     }
 
     private static EventSessionView session(LocalDateTime saleStartAt, LocalDateTime saleEndAt) {
+        return session(SessionSaleMode.NORMAL, saleStartAt, saleEndAt);
+    }
+
+    private static EventSessionView session(
+            SessionSaleMode saleMode,
+            LocalDateTime saleStartAt,
+            LocalDateTime saleEndAt) {
         return new EventSessionView(
                 SESSION_ID,
                 81L,
                 "Session",
                 null,
+                saleMode,
                 saleStartAt,
                 saleEndAt,
                 saleEndAt.plusHours(1),
@@ -596,6 +671,7 @@ class OrderServiceTest {
                 81L,
                 "Session",
                 null,
+                SessionSaleMode.NORMAL,
                 startAt.minusDays(2),
                 startAt.minusDays(1),
                 startAt,

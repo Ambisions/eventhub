@@ -25,6 +25,7 @@ import com.eventhub.event.api.model.ManagedEventView;
 import com.eventhub.event.api.model.PublicEventView;
 import com.eventhub.event.api.model.PublishedEventPage;
 import com.eventhub.event.api.model.ReviewEventView;
+import com.eventhub.event.api.model.SessionSaleMode;
 import com.eventhub.event.domain.EventInputPolicy;
 import com.eventhub.event.domain.EventCheckInPolicy;
 import com.eventhub.event.domain.EventSessionInputPolicy;
@@ -187,6 +188,7 @@ public class EventService implements PublicEventQueryApi, OrganizerEventApi, Adm
 
         EventSessionEntity session = new EventSessionEntity();
         session.setEventId(eventId);
+        session.setSaleMode(command.saleMode() == null ? SessionSaleMode.NORMAL : command.saleMode());
         applySessionInput(session, command.name(), command.venue(), command.saleStartAt(),
                 command.saleEndAt(), command.startAt(), command.endAt());
         eventSessionMapper.insert(session);
@@ -217,6 +219,7 @@ public class EventService implements PublicEventQueryApi, OrganizerEventApi, Adm
                 existing.getEventId(),
                 update.getName(),
                 update.getVenue(),
+                command.saleMode(),
                 update.getSaleStartAt(),
                 update.getSaleEndAt(),
                 update.getStartAt(),
@@ -384,7 +387,7 @@ public class EventService implements PublicEventQueryApi, OrganizerEventApi, Adm
 
     private static EventSessionView toSessionView(EventSessionEntity session) {
         return new EventSessionView(session.getId(), session.getEventId(), session.getName(),
-                session.getVenue(), session.getSaleStartAt(), session.getSaleEndAt(),
+                session.getVenue(), session.getSaleMode(), session.getSaleStartAt(), session.getSaleEndAt(),
                 session.getStartAt(), session.getEndAt(), session.getCreatedAt(), session.getUpdatedAt());
     }
 }

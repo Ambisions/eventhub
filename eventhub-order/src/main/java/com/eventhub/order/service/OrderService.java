@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import com.eventhub.event.api.PublicEventQueryApi;
 import com.eventhub.event.api.model.EventSessionView;
+import com.eventhub.event.api.model.SessionSaleMode;
 import com.eventhub.inventory.api.InventoryReservationApi;
 import com.eventhub.inventory.api.InventoryRefundApi;
 import com.eventhub.inventory.api.error.InventoryException;
@@ -73,13 +74,23 @@ public class OrderService implements ReservationApi, OrderQueryApi, OrderCommand
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrderView reserve(long userId, long sessionId) {
+        return reserveInternal(userId, sessionId, SessionSaleMode.NORMAL);
+    }
+
+    @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public OrderView reserveFlash(long userId, long sessionId) {
+        return reserveInternal(userId, sessionId, SessionSaleMode.FLASH);
+    }
+
+    private OrderView reserveInternal(long userId, long sessionId, SessionSaleMode expectedSaleMode) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
 
-        LocalDateTime reservationNow = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
-                .truncatedTo(ChronoUnit.MICROS);
         EventSessionView session = publicEventQueryApi.getPublishedSession(sessionId);
+        validateSaleMode(session, expectedSaleMode);
+        LocalDateTime reservationNow = currentUtcTime();
         validateSaleWindow(session, reservationNow);
 
         OrderEntity order = new OrderEntity();
@@ -271,6 +282,12 @@ public class OrderService implements ReservationApi, OrderQueryApi, OrderCommand
         }
         if (!reservationNow.isBefore(session.saleEndAt())) {
             throw new OrderException(OrderErrorCode.SALE_ENDED);
+        }
+    }
+
+    private static void validateSaleMode(EventSessionView session, SessionSaleMode expectedSaleMode) {
+        if (session.saleMode() != expectedSaleMode) {
+            throw new OrderException(OrderErrorCode.RESERVATION_MODE_MISMATCH);
         }
     }
 

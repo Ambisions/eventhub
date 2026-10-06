@@ -215,7 +215,7 @@ class EventSecurityIntegrationTest {
                 owner.profile().getId(),
                 event.id(),
                 new CreateEventSessionCommand(
-                        TEST_PREFIX + "Hidden Session", null,
+                        TEST_PREFIX + "Hidden Session", null, null,
                         times.saleStart(), times.saleEnd(), times.start(), times.end()))
                 .id();
 
@@ -236,6 +236,59 @@ class EventSecurityIntegrationTest {
                         .content("{\"title\":\"" + "x".repeat(201) + "\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_EVENT"));
+    }
+
+    @Test
+    void exposesSaleModeAcrossOrganizerCreateUpdateAndPublicSessionResponses() throws Exception {
+        Identity owner = register("sale-mode-owner", false);
+        Identity admin = register("sale-mode-admin", true);
+        ManagedEventView event = organizerEventApi.createEvent(
+                owner.profile().getId(), new CreateEventCommand(TEST_PREFIX + "sale-mode", null));
+        SessionTimes times = sessionTimes();
+
+        String normalBody = mockMvc.perform(post("/api/organizer/events/{id}/sessions", event.id())
+                        .header("Authorization", bearer(owner))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sessionJson(times, null)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.saleMode").value("NORMAL"))
+                .andReturn().getResponse().getContentAsString();
+        long normalSessionId = objectMapper.readTree(normalBody).get("id").asLong();
+
+        mockMvc.perform(put("/api/organizer/sessions/{id}", normalSessionId)
+                        .header("Authorization", bearer(owner))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sessionJson(times, null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.saleMode").value("NORMAL"));
+
+        String flashBody = mockMvc.perform(post("/api/organizer/events/{id}/sessions", event.id())
+                        .header("Authorization", bearer(owner))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sessionJson(times, "FLASH")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.saleMode").value("FLASH"))
+                .andReturn().getResponse().getContentAsString();
+        long flashSessionId = objectMapper.readTree(flashBody).get("id").asLong();
+
+        mockMvc.perform(put("/api/organizer/sessions/{id}", flashSessionId)
+                        .header("Authorization", bearer(owner))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sessionJson(times, "NORMAL")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.saleMode").value("NORMAL"));
+        mockMvc.perform(put("/api/organizer/sessions/{id}", flashSessionId)
+                        .header("Authorization", bearer(owner))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sessionJson(times, "FLASH")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.saleMode").value("FLASH"));
+
+        organizerEventApi.submitEvent(owner.profile().getId(), event.id());
+        adminEventReviewApi.approveEvent(event.id());
+        mockMvc.perform(get("/api/sessions/{id}", flashSessionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.saleMode").value("FLASH"));
     }
 
     @AfterTransaction
@@ -279,6 +332,16 @@ class EventSecurityIntegrationTest {
 
     private static String bearer(Identity identity) {
         return "Bearer " + identity.token().getTokenValue();
+    }
+
+    private static String sessionJson(SessionTimes times, String saleMode) {
+        String mode = saleMode == null ? "" : ",\"saleMode\":\"" + saleMode + "\"";
+        return "{\"name\":\"" + TEST_PREFIX + "HTTP Session\",\"venue\":\"Hall\""
+                + mode
+                + ",\"saleStartAt\":\"" + times.saleStart() + "\""
+                + ",\"saleEndAt\":\"" + times.saleEnd() + "\""
+                + ",\"startAt\":\"" + times.start() + "\""
+                + ",\"endAt\":\"" + times.end() + "\"}";
     }
 
     private static SessionTimes sessionTimes() {

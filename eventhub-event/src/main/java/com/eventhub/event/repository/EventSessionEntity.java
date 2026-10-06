@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.eventhub.event.api.model.SessionSaleMode;
 
 @TableName("event_sessions")
 public class EventSessionEntity {
@@ -14,6 +15,7 @@ public class EventSessionEntity {
     private Long eventId;
     private String name;
     private String venue;
+    private SessionSaleMode saleMode;
     private LocalDateTime saleStartAt;
     private LocalDateTime saleEndAt;
     private LocalDateTime startAt;
@@ -51,6 +53,14 @@ public class EventSessionEntity {
 
     public void setVenue(String venue) {
         this.venue = venue;
+    }
+
+    public SessionSaleMode getSaleMode() {
+        return saleMode;
+    }
+
+    public void setSaleMode(SessionSaleMode saleMode) {
+        this.saleMode = saleMode;
     }
 
     public LocalDateTime getSaleStartAt() {

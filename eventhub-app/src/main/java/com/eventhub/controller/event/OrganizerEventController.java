@@ -68,7 +68,7 @@ public final class OrganizerEventController {
             @Valid @RequestBody CreateEventSessionRequest request) {
         EventSessionResponse response = EventSessionResponse.from(organizerEventApi.createSession(
                 currentUser.userId(), eventId,
-                new CreateEventSessionCommand(request.name(), request.venue(), request.saleStartAt(),
+                new CreateEventSessionCommand(request.name(), request.venue(), request.saleMode(), request.saleStartAt(),
                         request.saleEndAt(), request.startAt(), request.endAt())));
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
@@ -80,7 +80,7 @@ public final class OrganizerEventController {
             @Valid @RequestBody UpdateEventSessionRequest request) {
         return EventSessionResponse.from(organizerEventApi.updateSession(
                 currentUser.userId(), sessionId,
-                new UpdateEventSessionCommand(request.name(), request.venue(), request.saleStartAt(),
+                new UpdateEventSessionCommand(request.name(), request.venue(), request.saleMode(), request.saleStartAt(),
                         request.saleEndAt(), request.startAt(), request.endAt())));
     }
 

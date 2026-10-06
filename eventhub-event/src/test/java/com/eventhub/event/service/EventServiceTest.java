@@ -2,8 +2,11 @@ package com.eventhub.event.service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
+import com.eventhub.event.api.command.CreateEventSessionCommand;
 import com.eventhub.event.api.command.UpdateEventCommand;
+import com.eventhub.event.api.command.UpdateEventSessionCommand;
 import com.eventhub.event.api.error.EventErrorCode;
 import com.eventhub.event.api.error.EventException;
 import com.eventhub.event.api.error.EventCheckInAuthorizationException;
@@ -11,6 +14,7 @@ import com.eventhub.event.api.error.EventCheckInAuthorizationFailure;
 import com.eventhub.event.api.model.EventStatus;
 import com.eventhub.event.api.model.EditableEventSessionContext;
 import com.eventhub.event.api.model.ManagedEventView;
+import com.eventhub.event.api.model.SessionSaleMode;
 import com.eventhub.event.mapper.EventMapper;
 import com.eventhub.event.mapper.EventSessionMapper;
 import com.eventhub.event.repository.EventEntity;
@@ -19,12 +23,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -148,6 +154,103 @@ class EventServiceTest {
         verify(eventSessionMapper).selectOwnedCheckInSession(OWNER_ID, 30L);
     }
 
+    @Test
+    void defaultsNullCreateModeToNormalAndPropagatesExplicitModes() {
+        assertCreateMode(null, SessionSaleMode.NORMAL);
+        assertCreateMode(SessionSaleMode.NORMAL, SessionSaleMode.NORMAL);
+        assertCreateMode(SessionSaleMode.FLASH, SessionSaleMode.FLASH);
+    }
+
+    @Test
+    void passesNullUpdateModeThroughSoDynamicSqlRetainsThePersistedMode() {
+        SessionTimes times = sessionTimes();
+        EventSessionEntity existing = session(SessionSaleMode.FLASH, times);
+        EventSessionEntity persisted = session(SessionSaleMode.FLASH, times);
+        when(eventSessionMapper.selectById(30L)).thenReturn(existing, persisted);
+        when(eventMapper.selectByIdForUpdate(EVENT_ID))
+                .thenReturn(event(OWNER_ID, EventStatus.DRAFT, "Title", null));
+        when(eventSessionMapper.updateSession(
+                30L, EVENT_ID, "Session", "Hall", null,
+                times.saleStart(), times.saleEnd(), times.start(), times.end()))
+                .thenReturn(1);
+
+        var result = eventService.updateSession(OWNER_ID, 30L, new UpdateEventSessionCommand(
+                "Session", "Hall", null,
+                times.saleStart(), times.saleEnd(), times.start(), times.end()));
+
+        assertEquals(SessionSaleMode.FLASH, result.saleMode());
+        verify(eventSessionMapper).updateSession(
+                30L, EVENT_ID, "Session", "Hall", null,
+                times.saleStart(), times.saleEnd(), times.start(), times.end());
+    }
+
+    @Test
+    void propagatesExplicitUpdateMode() {
+        SessionTimes times = sessionTimes();
+        EventSessionEntity existing = session(SessionSaleMode.NORMAL, times);
+        EventSessionEntity persisted = session(SessionSaleMode.FLASH, times);
+        when(eventSessionMapper.selectById(30L)).thenReturn(existing, persisted);
+        when(eventMapper.selectByIdForUpdate(EVENT_ID))
+                .thenReturn(event(OWNER_ID, EventStatus.REJECTED, "Title", null));
+        when(eventSessionMapper.updateSession(
+                30L, EVENT_ID, "Session", "Hall", SessionSaleMode.FLASH,
+                times.saleStart(), times.saleEnd(), times.start(), times.end()))
+                .thenReturn(1);
+
+        var result = eventService.updateSession(OWNER_ID, 30L, new UpdateEventSessionCommand(
+                "Session", "Hall", SessionSaleMode.FLASH,
+                times.saleStart(), times.saleEnd(), times.start(), times.end()));
+
+        assertEquals(SessionSaleMode.FLASH, result.saleMode());
+        verify(eventSessionMapper).updateSession(
+                30L, EVENT_ID, "Session", "Hall", SessionSaleMode.FLASH,
+                times.saleStart(), times.saleEnd(), times.start(), times.end());
+    }
+
+    private void assertCreateMode(SessionSaleMode requested, SessionSaleMode expected) {
+        SessionTimes times = sessionTimes();
+        AtomicReference<EventSessionEntity> inserted = new AtomicReference<>();
+        when(eventMapper.selectByIdForUpdate(EVENT_ID))
+                .thenReturn(event(OWNER_ID, EventStatus.DRAFT, "Title", null));
+        when(eventSessionMapper.insert(any(EventSessionEntity.class))).thenAnswer(invocation -> {
+            EventSessionEntity entity = invocation.getArgument(0);
+            entity.setId(30L);
+            inserted.set(entity);
+            return 1;
+        });
+        when(eventSessionMapper.selectById(30L)).thenAnswer(invocation -> inserted.get());
+
+        var result = eventService.createSession(OWNER_ID, EVENT_ID, new CreateEventSessionCommand(
+                "Session", "Hall", requested,
+                times.saleStart(), times.saleEnd(), times.start(), times.end()));
+
+        ArgumentCaptor<EventSessionEntity> captor = ArgumentCaptor.forClass(EventSessionEntity.class);
+        verify(eventSessionMapper).insert(captor.capture());
+        assertEquals(expected, captor.getValue().getSaleMode());
+        assertEquals(expected, result.saleMode());
+        org.mockito.Mockito.reset(eventMapper, eventSessionMapper);
+    }
+
+    private static EventSessionEntity session(SessionSaleMode saleMode, SessionTimes times) {
+        EventSessionEntity session = new EventSessionEntity();
+        session.setId(30L);
+        session.setEventId(EVENT_ID);
+        session.setName("Session");
+        session.setVenue("Hall");
+        session.setSaleMode(saleMode);
+        session.setSaleStartAt(times.saleStart());
+        session.setSaleEndAt(times.saleEnd());
+        session.setStartAt(times.start());
+        session.setEndAt(times.end());
+        return session;
+    }
+
+    private static SessionTimes sessionTimes() {
+        LocalDateTime saleStart = LocalDateTime.of(2030, 5, 1, 9, 0);
+        return new SessionTimes(saleStart, saleStart.plusDays(1),
+                saleStart.plusDays(2), saleStart.plusDays(2).plusHours(2));
+    }
+
     private static EventEntity event(long ownerId, EventStatus status, String title, String description) {
         EventEntity event = new EventEntity();
         event.setId(EVENT_ID);
@@ -156,5 +259,12 @@ class EventServiceTest {
         event.setTitle(title);
         event.setDescription(description);
         return event;
+    }
+
+    private record SessionTimes(
+            LocalDateTime saleStart,
+            LocalDateTime saleEnd,
+            LocalDateTime start,
+            LocalDateTime end) {
     }
 }

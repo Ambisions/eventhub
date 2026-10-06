@@ -205,7 +205,7 @@ class InventoryFoundationIntegrationTest {
         SessionTimes times = sessionTimes();
         long sessionId = organizerEventApi.createSession(
                 owner.profile().getId(), event.id(),
-                new CreateEventSessionCommand(TEST_PREFIX + scenario + "-session-" + shortId(), null,
+                new CreateEventSessionCommand(TEST_PREFIX + scenario + "-session-" + shortId(), null, null,
                         times.saleStart(), times.saleEnd(), times.start(), times.end())).id();
         return new Fixture(owner, event.id(), sessionId);
     }

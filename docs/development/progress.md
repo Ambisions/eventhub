@@ -726,6 +726,34 @@ Status: `COMPLETE / VERIFIED / FROZEN`
 
 ### Batch 2 — Sale Mode Foundation
 
-Precheck: `PASS`
+Status: `COMPLETE / VERIFIED`
 
-Implementation: `NOT STARTED`
+- Trusted baseline: `d7b30784353f22c8f80ae12a800dfd4c37120bb4`.
+- Flyway V4 is verified. `SessionSaleMode` contains only `NORMAL` and `FLASH`;
+  create with an omitted or `null` mode persists `NORMAL`, while update with an
+  omitted or `null` mode retains the current value.
+- Session mode remains editable only while the parent Event is `DRAFT` or
+  `REJECTED`; `PENDING_REVIEW` and `PUBLISHED` remain immutable.
+- `ReservationApi.reserve` owns the `NORMAL` entry and
+  `ReservationApi.reserveFlash` owns the `FLASH` entry. Both use
+  `READ_COMMITTED`, and the mode gate executes before Clock access, sale-window
+  validation, or database writes.
+- Phase 6 write order remains `Order INSERT -> Inventory lockOne`.
+  `RESERVATION_MODE_MISMATCH` maps to HTTP `409`.
+- Fresh V1 -> V4 migration, independent V3 -> V4 upgrade, MySQL metadata and
+  CHECK behavior, Event create/update/lifecycle, and bidirectional NORMAL/FLASH
+  database mode gates passed. Existing Sessions upgraded through V4 receive
+  `sale_mode = NORMAL`.
+- Matching FLASH database reservation preserves the inventory invariant with
+  `available Δ = -1` and `locked Δ = +1`; no negative inventory was
+  observed. Existing NORMAL concurrency verification also passed.
+- Targeted verification passed 74 tests. Full regression passed 51 suites / 258
+  tests with zero failures, errors, or skips; Spring Boot repackage succeeded.
+- Formal Reviewer passed. Test Reviewer reported `PROVEN: 12`, `PARTIAL: 0`,
+  `NOT_PROVEN: 0`, and `Blocking Gap: NO`.
+- FLASH HTTP is not implemented. Redis business implementation is not started;
+  RabbitMQ, Rate Limit, Retry, and DLQ remain future work.
+
+### Batch 3 — Redis Admission + Preparation
+
+Status: `NOT STARTED`

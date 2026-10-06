@@ -131,7 +131,7 @@ class EventConcurrencyIntegrationTest {
                             OWNER_ID,
                             event.id(),
                             new CreateEventSessionCommand(
-                                    TEST_PREFIX + "created-session", null,
+                                    TEST_PREFIX + "created-session", null, null,
                                     times.saleStart(), times.saleEnd(), times.start(), times.end())));
 
             assertThat(databaseStatus(event.id())).isEqualTo("PENDING_REVIEW");
@@ -152,7 +152,7 @@ class EventConcurrencyIntegrationTest {
                     OWNER_ID,
                     event.id(),
                     new CreateEventSessionCommand(
-                            TEST_PREFIX + "late-session", null,
+                            TEST_PREFIX + "late-session", null, null,
                             times.saleStart(), times.saleEnd(), times.start(), times.end())));
 
             assertThat(databaseStatus(event.id())).isEqualTo("PENDING_REVIEW");
@@ -170,7 +170,7 @@ class EventConcurrencyIntegrationTest {
                 OWNER_ID,
                 event.id(),
                 new CreateEventSessionCommand(
-                        TEST_PREFIX + "original-session", null,
+                        TEST_PREFIX + "original-session", null, null,
                         times.saleStart(), times.saleEnd(), times.start(), times.end())).id();
         String updatedName = TEST_PREFIX + "updated-session";
         try {
@@ -180,7 +180,7 @@ class EventConcurrencyIntegrationTest {
                             OWNER_ID,
                             sessionId,
                             new UpdateEventSessionCommand(
-                                    updatedName, "Hall B",
+                                    updatedName, "Hall B", null,
                                     times.saleStart(), times.saleEnd(), times.start(), times.end())));
 
             assertThat(databaseStatus(event.id())).isEqualTo("PENDING_REVIEW");
@@ -198,7 +198,7 @@ class EventConcurrencyIntegrationTest {
                 OWNER_ID,
                 event.id(),
                 new CreateEventSessionCommand(
-                        TEST_PREFIX + "original-session", null,
+                        TEST_PREFIX + "original-session", null, null,
                         times.saleStart(), times.saleEnd(), times.start(), times.end())).id();
         try {
             organizerEventApi.submitEvent(OWNER_ID, event.id());
@@ -207,7 +207,7 @@ class EventConcurrencyIntegrationTest {
                     OWNER_ID,
                     sessionId,
                     new UpdateEventSessionCommand(
-                            TEST_PREFIX + "late-update", "Hall C",
+                            TEST_PREFIX + "late-update", "Hall C", null,
                             times.saleStart(), times.saleEnd(), times.start(), times.end())));
 
             assertThat(databaseStatus(event.id())).isEqualTo("PENDING_REVIEW");

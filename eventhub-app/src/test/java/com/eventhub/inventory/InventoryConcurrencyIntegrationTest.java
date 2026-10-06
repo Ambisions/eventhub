@@ -148,7 +148,7 @@ class InventoryConcurrencyIntegrationTest {
         SessionTimes times = sessionTimes();
         long sessionId = organizerEventApi.createSession(
                 OWNER_ID, event.id(),
-                new CreateEventSessionCommand(TEST_PREFIX + scenario + "-session", null,
+                new CreateEventSessionCommand(TEST_PREFIX + scenario + "-session", null, null,
                         times.saleStart(), times.saleEnd(), times.start(), times.end())).id();
         return new Fixture(event.id(), sessionId);
     }

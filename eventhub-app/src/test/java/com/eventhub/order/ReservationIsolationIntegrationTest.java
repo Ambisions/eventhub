@@ -67,6 +67,23 @@ class ReservationIsolationIntegrationTest {
         assertThat(inventory(sessionId)).isEqualTo(new InventoryState(2, 1, 1, 0));
     }
 
+    @Test
+    void reserveFlashAlsoUsesReadCommittedOnTheBoundTransaction() {
+        long userId = createUser();
+        long sessionId = createFixture("FLASH");
+        isolationObserver.reset();
+
+        var created = reservationApi.reserveFlash(userId, sessionId);
+
+        IsolationObservation observation = isolationObserver.requireObservation();
+        assertThat(observation.transactionActive()).isTrue();
+        assertThat(observation.connectionBoundToTransaction()).isTrue();
+        assertThat(observation.jdbcIsolation()).isEqualTo(Connection.TRANSACTION_READ_COMMITTED);
+        assertThat(observation.mysqlIsolation()).isEqualTo("READ-COMMITTED");
+        assertThat(created.status()).isEqualTo(OrderStatus.WAIT_PAY);
+        assertThat(inventory(sessionId)).isEqualTo(new InventoryState(2, 1, 1, 0));
+    }
+
     @AfterEach
     void cleanupAndVerifyNoIsolationTestResidue() {
         jdbcTemplate.update("DELETE o FROM ticket_order o JOIN event_sessions s ON s.id = o.session_id "
@@ -99,6 +116,10 @@ class ReservationIsolationIntegrationTest {
     }
 
     private long createFixture() {
+        return createFixture("NORMAL");
+    }
+
+    private long createFixture(String saleMode) {
         String suffix = shortId();
         String title = TEST_PREFIX + suffix;
         jdbcTemplate.update("INSERT INTO events (organizer_user_id, title, status) "
@@ -108,9 +129,9 @@ class ReservationIsolationIntegrationTest {
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         String sessionName = TEST_PREFIX + suffix;
         jdbcTemplate.update("INSERT INTO event_sessions "
-                        + "(event_id, name, sale_start_at, sale_end_at, start_at, end_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?)",
-                eventId, sessionName, now.minusMinutes(5), now.plusMinutes(5),
+                        + "(event_id, name, sale_mode, sale_start_at, sale_end_at, start_at, end_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                eventId, sessionName, saleMode, now.minusMinutes(5), now.plusMinutes(5),
                 now.plusHours(3), now.plusHours(5));
         long sessionId = jdbcTemplate.queryForObject(
                 "SELECT id FROM event_sessions WHERE name = ?", Long.class, sessionName);

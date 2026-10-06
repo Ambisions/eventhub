@@ -34,7 +34,7 @@ class RefundSchemaMigrationIntegrationTest {
     void recordsV3AndExposesTheFrozenSchemaMetadata() {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM flyway_schema_history WHERE success = TRUE", Integer.class))
-                .isEqualTo(3);
+                .isEqualTo(4);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM flyway_schema_history WHERE success = FALSE", Integer.class))
                 .isZero();

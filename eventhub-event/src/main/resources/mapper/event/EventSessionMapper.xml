@@ -9,6 +9,7 @@
         <result column="event_id" property="eventId"/>
         <result column="name" property="name"/>
         <result column="venue" property="venue"/>
+        <result column="sale_mode" property="saleMode"/>
         <result column="sale_start_at" property="saleStartAt"/>
         <result column="sale_end_at" property="saleEndAt"/>
         <result column="start_at" property="startAt"/>
@@ -18,7 +19,7 @@
     </resultMap>
 
     <sql id="sessionColumns">
-        s.id, s.event_id, s.name, s.venue, s.sale_start_at, s.sale_end_at,
+        s.id, s.event_id, s.name, s.venue, s.sale_mode, s.sale_start_at, s.sale_end_at,
         s.start_at, s.end_at, s.created_at, s.updated_at
     </sql>
 
@@ -49,13 +50,18 @@
 
     <update id="updateSession">
         UPDATE event_sessions
-        SET name = #{name},
+        <set>
+            name = #{name},
             venue = #{venue},
+            <if test="saleMode != null">
+                sale_mode = #{saleMode},
+            </if>
             sale_start_at = #{saleStartAt},
             sale_end_at = #{saleEndAt},
             start_at = #{startAt},
             end_at = #{endAt},
             updated_at = CURRENT_TIMESTAMP(6)
+        </set>
         WHERE id = #{sessionId}
           AND event_id = #{eventId}
     </update>

@@ -17,6 +17,7 @@ import com.eventhub.event.api.model.EventSessionView;
 import com.eventhub.event.api.model.EventStatus;
 import com.eventhub.event.api.model.ManagedEventView;
 import com.eventhub.event.api.model.PublicEventView;
+import com.eventhub.event.api.model.SessionSaleMode;
 import com.eventhub.event.mapper.EventMapper;
 import com.eventhub.event.mapper.EventSessionMapper;
 import org.junit.jupiter.api.Test;
@@ -138,12 +139,13 @@ class EventFoundationIntegrationTest {
                 OWNER_ID,
                 event.id(),
                 new CreateEventSessionCommand(
-                        "  " + TEST_PREFIX + "Main Session  ", "   ", times.saleStart(), times.saleEnd(),
+                        "  " + TEST_PREFIX + "Main Session  ", "   ", null, times.saleStart(), times.saleEnd(),
                         times.start(), times.end()));
 
         assertThat(session.eventId()).isEqualTo(event.id());
         assertThat(session.name()).isEqualTo(TEST_PREFIX + "Main Session");
         assertThat(session.venue()).isNull();
+        assertThat(session.saleMode()).isEqualTo(SessionSaleMode.NORMAL);
         assertEventError(
                 () -> publicEventQueryApi.listPublishedSessions(event.id()),
                 EventErrorCode.EVENT_NOT_FOUND);
@@ -155,17 +157,44 @@ class EventFoundationIntegrationTest {
                 OWNER_ID,
                 session.id(),
                 new UpdateEventSessionCommand(
-                        "  " + TEST_PREFIX + "Updated Session  ", "  Hall A  ",
+                        "  " + TEST_PREFIX + "Updated Session  ", "  Hall A  ", SessionSaleMode.FLASH,
                         times.saleStart(), times.saleEnd(),
                         times.start(), times.end()));
         assertThat(updated.eventId()).isEqualTo(event.id());
         assertThat(updated.name()).isEqualTo(TEST_PREFIX + "Updated Session");
         assertThat(updated.venue()).isEqualTo("Hall A");
+        assertThat(updated.saleMode()).isEqualTo(SessionSaleMode.FLASH);
 
+        organizerEventApi.submitEvent(OWNER_ID, event.id());
+        assertEventError(
+                () -> organizerEventApi.updateSession(
+                        OWNER_ID,
+                        session.id(),
+                        new UpdateEventSessionCommand(
+                                TEST_PREFIX + "Pending edit", null, SessionSaleMode.NORMAL,
+                                times.saleStart(), times.saleEnd(), times.start(), times.end())),
+                EventErrorCode.EVENT_NOT_EDITABLE);
+        adminEventReviewApi.rejectEvent(event.id(), new RejectEventCommand("Adjust sale mode"));
+        EventSessionView rejectedUpdate = organizerEventApi.updateSession(
+                OWNER_ID,
+                session.id(),
+                new UpdateEventSessionCommand(
+                        TEST_PREFIX + "Rejected update", "Hall B", null,
+                        times.saleStart(), times.saleEnd(), times.start(), times.end()));
+        assertThat(rejectedUpdate.saleMode()).isEqualTo(SessionSaleMode.FLASH);
+        EventSessionView normalUpdate = organizerEventApi.updateSession(
+                OWNER_ID,
+                session.id(),
+                new UpdateEventSessionCommand(
+                        TEST_PREFIX + "Updated Session", "Hall A", SessionSaleMode.NORMAL,
+                        times.saleStart(), times.saleEnd(), times.start(), times.end()));
+        assertThat(normalUpdate.saleMode()).isEqualTo(SessionSaleMode.NORMAL);
         organizerEventApi.submitEvent(OWNER_ID, event.id());
         adminEventReviewApi.approveEvent(event.id());
         assertThat(publicEventQueryApi.getPublishedSession(session.id()).name())
                 .isEqualTo(TEST_PREFIX + "Updated Session");
+        assertThat(publicEventQueryApi.getPublishedSession(session.id()).saleMode())
+                .isEqualTo(SessionSaleMode.NORMAL);
         assertThat(publicEventQueryApi.listPublishedSessions(event.id())).hasSize(1);
 
         assertEventError(
@@ -173,7 +202,7 @@ class EventFoundationIntegrationTest {
                         OWNER_ID,
                         session.id(),
                         new UpdateEventSessionCommand(
-                                TEST_PREFIX + "Too late", null, times.saleStart(), times.saleEnd(),
+                                TEST_PREFIX + "Too late", null, null, times.saleStart(), times.saleEnd(),
                                 times.start(), times.end())),
                 EventErrorCode.EVENT_NOT_EDITABLE);
     }
@@ -217,7 +246,7 @@ class EventFoundationIntegrationTest {
                         OTHER_USER_ID,
                         event.id(),
                         new CreateEventSessionCommand(
-                                "Session", null, times.saleStart(), times.saleEnd(),
+                                "Session", null, null, times.saleStart(), times.saleEnd(),
                                 times.start(), times.end())),
                 EventErrorCode.EVENT_NOT_FOUND);
     }

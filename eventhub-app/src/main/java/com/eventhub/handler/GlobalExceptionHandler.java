@@ -126,7 +126,7 @@ public final class GlobalExceptionHandler {
     private static HttpStatus statusFor(OrderErrorCode errorCode) {
         return switch (errorCode) {
             case ORDER_NOT_FOUND -> HttpStatus.NOT_FOUND;
-            case ACTIVE_PURCHASE_EXISTS, SALE_NOT_STARTED, SALE_ENDED,
+            case ACTIVE_PURCHASE_EXISTS, SALE_NOT_STARTED, SALE_ENDED, RESERVATION_MODE_MISMATCH,
                     ORDER_EXPIRED, ORDER_STATE_CONFLICT, ORDER_NOT_REFUNDABLE,
                     ORDER_REFUND_WINDOW_CLOSED, ORDER_REFUND_TICKET_USED -> HttpStatus.CONFLICT;
         };

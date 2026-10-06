@@ -212,6 +212,32 @@ class NormalReservationIntegrationTest {
         assertThat(inventory(duplicate.sessionId())).isEqualTo(new InventoryState(2, 1, 1, 0));
     }
 
+    @Test
+    void enforcesBidirectionalModeGatesAndAllowsMatchingFlashMysqlReservation() throws Exception {
+        Identity identity = register("mode-http");
+        long userId = identity.profile().getId();
+
+        Fixture flashBefore = createFixture("flash-before", "PUBLISHED", Window.BEFORE, 2, "FLASH");
+        postExpecting(bearer(identity), flashBefore.sessionId(), 409, "RESERVATION_MODE_MISMATCH");
+        assertThat(orderCount(flashBefore.sessionId())).isZero();
+        assertThat(inventory(flashBefore.sessionId())).isEqualTo(new InventoryState(2, 2, 0, 0));
+
+        Fixture normal = createFixture("normal-reverse", "PUBLISHED", Window.OPEN, 2);
+        assertThatThrownBy(() -> reservationApi.reserveFlash(userId, normal.sessionId()))
+                .isInstanceOfSatisfying(OrderException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(OrderErrorCode.RESERVATION_MODE_MISMATCH));
+        assertThat(orderCount(normal.sessionId())).isZero();
+        assertThat(inventory(normal.sessionId())).isEqualTo(new InventoryState(2, 2, 0, 0));
+
+        Fixture flash = createFixture("flash-success", "PUBLISHED", Window.OPEN, 2, "FLASH");
+        var created = reservationApi.reserveFlash(userId, flash.sessionId());
+        assertThat(created.status()).isEqualTo(OrderStatus.WAIT_PAY);
+        assertThat(orderCount(flash.sessionId())).isEqualTo(1);
+        assertThat(inventory(flash.sessionId())).isEqualTo(new InventoryState(2, 1, 1, 0));
+        assertInventoryInvariant(flash.sessionId());
+    }
+
     @AfterEach
     void cleanupAndVerifyNoSyntheticResidue() {
         jdbcTemplate.update("DELETE o FROM ticket_order o JOIN event_sessions s ON s.id = o.session_id "
@@ -269,6 +295,15 @@ class NormalReservationIntegrationTest {
     }
 
     private Fixture createFixture(String scenario, String eventStatus, Window window, Integer stock) {
+        return createFixture(scenario, eventStatus, window, stock, "NORMAL");
+    }
+
+    private Fixture createFixture(
+            String scenario,
+            String eventStatus,
+            Window window,
+            Integer stock,
+            String saleMode) {
         String suffix = scenario + '-' + shortId();
         String title = TEST_PREFIX + suffix;
         jdbcTemplate.update("INSERT INTO events (organizer_user_id, title, status) VALUES (?, ?, ?)",
@@ -290,9 +325,9 @@ class NormalReservationIntegrationTest {
         }
         String sessionName = TEST_PREFIX + suffix;
         jdbcTemplate.update("INSERT INTO event_sessions "
-                        + "(event_id, name, sale_start_at, sale_end_at, start_at, end_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?)",
-                eventId, sessionName, saleStart, saleEnd, now.plusHours(3), now.plusHours(5));
+                        + "(event_id, name, sale_mode, sale_start_at, sale_end_at, start_at, end_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                eventId, sessionName, saleMode, saleStart, saleEnd, now.plusHours(3), now.plusHours(5));
         long sessionId = jdbcTemplate.queryForObject(
                 "SELECT id FROM event_sessions WHERE name = ?", Long.class, sessionName);
         if (stock != null) {

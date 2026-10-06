@@ -7,6 +7,7 @@ public record EventSessionView(
         long eventId,
         String name,
         String venue,
+        SessionSaleMode saleMode,
         LocalDateTime saleStartAt,
         LocalDateTime saleEndAt,
         LocalDateTime startAt,
