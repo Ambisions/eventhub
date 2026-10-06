@@ -756,4 +756,29 @@ Status: `COMPLETE / VERIFIED`
 
 ### Batch 3 — Redis Admission + Preparation
 
+Status: `COMPLETE / VERIFIED`
+
+- `eventhub-inventory` owns the Redis admission primitives and exact hash-tagged
+  FLASH keys; `eventhub-app` owns explicit ADMIN-only Preparation orchestration.
+- Real Redis 8.2.9 verified prepare idempotency without stock reset, Redis-TIME
+  sale-window boundaries, atomic reserve, same-user admission semantics, settle
+  fencing, release idempotency, malformed-state rejection, and failure-path
+  no-mutation behavior.
+- Capacity-one / 50-user concurrency, same-user same-ID concurrency, and
+  same-user different-ID concurrency all preserved the frozen stock/admission
+  invariant without negative stock.
+- Real MySQL 8.4.11 + Redis + JWT/MockMvc verification proved eligible
+  Preparation, dirty/ineligible rejection without partial Redis state, ADMIN
+  authorization, and sanitized `503` behavior when Redis is unavailable.
+- Phase 6–9 NORMAL Reservation, Pay, Cancel, Timeout, and Refund integration
+  suites passed with Redis deliberately unavailable, proving no eager lifecycle
+  coupling to the new adapter.
+- The final fresh Maven regression passed 57 suites / 282 tests with zero
+  failures, errors, or skips; Spring Boot repackage succeeded. Formal Reviewer
+  and Test Reviewer passed with no blocking verification gap.
+- No FLASH Reservation HTTP endpoint, Order lifecycle Redis synchronization,
+  RabbitMQ business flow, Rate Limit, WaitingList, or V5 migration was added.
+
+### Batch 4
+
 Status: `NOT STARTED`

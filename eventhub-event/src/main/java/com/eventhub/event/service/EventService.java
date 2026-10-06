@@ -6,6 +6,7 @@ import java.util.Objects;
 
 import com.eventhub.event.api.AdminEventReviewApi;
 import com.eventhub.event.api.EventCheckInAuthorizationApi;
+import com.eventhub.event.api.FlashPreparationEventQueryApi;
 import com.eventhub.event.api.OrganizerEventApi;
 import com.eventhub.event.api.OrganizerEventSessionGuardApi;
 import com.eventhub.event.api.PublicEventQueryApi;
@@ -20,6 +21,7 @@ import com.eventhub.event.api.error.EventCheckInAuthorizationException;
 import com.eventhub.event.api.error.EventCheckInAuthorizationFailure;
 import com.eventhub.event.api.model.EventSessionView;
 import com.eventhub.event.api.model.EditableEventSessionContext;
+import com.eventhub.event.api.model.FlashPreparationEventContext;
 import com.eventhub.event.api.model.EventStatus;
 import com.eventhub.event.api.model.ManagedEventView;
 import com.eventhub.event.api.model.PublicEventView;
@@ -40,7 +42,7 @@ import org.springframework.transaction.annotation.Propagation;
 
 @Service
 public class EventService implements PublicEventQueryApi, OrganizerEventApi, AdminEventReviewApi,
-        OrganizerEventSessionGuardApi, EventCheckInAuthorizationApi {
+        OrganizerEventSessionGuardApi, EventCheckInAuthorizationApi, FlashPreparationEventQueryApi {
 
     private static final int MAX_PAGE_SIZE = 100;
 
@@ -97,6 +99,27 @@ public class EventService implements PublicEventQueryApi, OrganizerEventApi, Adm
             throw new EventException(EventErrorCode.SESSION_NOT_FOUND);
         }
         return toSessionView(session);
+    }
+
+    @Override
+    public FlashPreparationEventContext getPreparationContext(long eventId, long sessionId) {
+        validateEventId(eventId);
+        validateSessionId(sessionId);
+        EventEntity event = eventMapper.selectById(eventId);
+        if (event == null) {
+            throw new EventException(EventErrorCode.EVENT_NOT_FOUND);
+        }
+        EventSessionEntity session = eventSessionMapper.selectById(sessionId);
+        if (session == null || session.getEventId() != eventId) {
+            throw new EventException(EventErrorCode.SESSION_NOT_FOUND);
+        }
+        return new FlashPreparationEventContext(
+                eventId,
+                sessionId,
+                event.getStatus(),
+                session.getSaleMode(),
+                session.getSaleStartAt(),
+                session.getSaleEndAt());
     }
 
     @Override

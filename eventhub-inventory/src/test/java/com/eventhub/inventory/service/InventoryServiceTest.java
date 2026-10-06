@@ -155,6 +155,28 @@ class InventoryServiceTest {
         verify(inventoryMapper, never()).selectBySessionId(SESSION_ID);
     }
 
+    @Test
+    void returnsAuthoritativeInventoryViewForPreparationQuery() {
+        when(inventoryMapper.selectBySessionId(SESSION_ID)).thenReturn(inventory(9, 9, 0, 0));
+
+        var result = inventoryService.getInventory(SESSION_ID);
+
+        assertEquals(SESSION_ID, result.sessionId());
+        assertEquals(9, result.totalStock());
+        assertEquals(9, result.availableStock());
+        assertEquals(0, result.lockedStock());
+        assertEquals(0, result.soldStock());
+    }
+
+    @Test
+    void mapsMissingOrInvalidPreparationInventoryQueryToNotConfigured() {
+        assertInventoryError(() -> inventoryService.getInventory(0),
+                InventoryErrorCode.INVENTORY_NOT_CONFIGURED);
+        when(inventoryMapper.selectBySessionId(SESSION_ID)).thenReturn(null);
+        assertInventoryError(() -> inventoryService.getInventory(SESSION_ID),
+                InventoryErrorCode.INVENTORY_NOT_CONFIGURED);
+    }
+
     private static InventoryEntity inventory(int total, int available, int locked, int sold) {
         InventoryEntity entity = new InventoryEntity();
         entity.setId(1L);

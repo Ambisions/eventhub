@@ -13,6 +13,7 @@ import com.eventhub.event.api.error.EventCheckInAuthorizationException;
 import com.eventhub.event.api.error.EventCheckInAuthorizationFailure;
 import com.eventhub.event.api.model.EventStatus;
 import com.eventhub.event.api.model.EditableEventSessionContext;
+import com.eventhub.event.api.model.FlashPreparationEventContext;
 import com.eventhub.event.api.model.ManagedEventView;
 import com.eventhub.event.api.model.SessionSaleMode;
 import com.eventhub.event.mapper.EventMapper;
@@ -205,6 +206,39 @@ class EventServiceTest {
         verify(eventSessionMapper).updateSession(
                 30L, EVENT_ID, "Session", "Hall", SessionSaleMode.FLASH,
                 times.saleStart(), times.saleEnd(), times.start(), times.end());
+    }
+
+    @Test
+    void returnsFlashPreparationContextForMatchingEventAndSession() {
+        SessionTimes times = sessionTimes();
+        EventSessionEntity session = session(SessionSaleMode.FLASH, times);
+        when(eventMapper.selectById(EVENT_ID))
+                .thenReturn(event(OWNER_ID, EventStatus.PUBLISHED, "Title", null));
+        when(eventSessionMapper.selectById(30L)).thenReturn(session);
+
+        FlashPreparationEventContext context = eventService.getPreparationContext(EVENT_ID, 30L);
+
+        assertEquals(EVENT_ID, context.eventId());
+        assertEquals(30L, context.sessionId());
+        assertEquals(EventStatus.PUBLISHED, context.eventStatus());
+        assertEquals(SessionSaleMode.FLASH, context.saleMode());
+        assertEquals(times.saleStart(), context.saleStartAt());
+        assertEquals(times.saleEnd(), context.saleEndAt());
+    }
+
+    @Test
+    void hidesPreparationSessionThatBelongsToAnotherEvent() {
+        EventSessionEntity session = session(SessionSaleMode.FLASH, sessionTimes());
+        session.setEventId(EVENT_ID + 1);
+        when(eventMapper.selectById(EVENT_ID))
+                .thenReturn(event(OWNER_ID, EventStatus.PUBLISHED, "Title", null));
+        when(eventSessionMapper.selectById(30L)).thenReturn(session);
+
+        EventException exception = assertThrows(
+                EventException.class,
+                () -> eventService.getPreparationContext(EVENT_ID, 30L));
+
+        assertEquals(EventErrorCode.SESSION_NOT_FOUND, exception.getErrorCode());
     }
 
     private void assertCreateMode(SessionSaleMode requested, SessionSaleMode expected) {

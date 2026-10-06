@@ -2,6 +2,8 @@ package com.eventhub.handler;
 
 import com.eventhub.application.checkin.error.CheckInErrorCode;
 import com.eventhub.application.checkin.error.CheckInException;
+import com.eventhub.application.flash.error.FlashPreparationErrorCode;
+import com.eventhub.application.flash.error.FlashPreparationException;
 import com.eventhub.auth.api.error.AuthErrorCode;
 import com.eventhub.auth.api.error.AuthException;
 import com.eventhub.event.api.error.EventErrorCode;
@@ -80,6 +82,13 @@ public final class GlobalExceptionHandler {
                 exception.getErrorCode().getCode(), exception.getMessage()));
     }
 
+    @ExceptionHandler(FlashPreparationException.class)
+    public ResponseEntity<ApiErrorResponse> handleFlashPreparationException(
+            FlashPreparationException exception) {
+        return ResponseEntity.status(statusFor(exception.getErrorCode())).body(new ApiErrorResponse(
+                exception.getErrorCode().getCode(), exception.getMessage()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidationException(MethodArgumentNotValidException exception) {
         return ResponseEntity.badRequest().body(
@@ -146,6 +155,15 @@ public final class GlobalExceptionHandler {
             case TICKET_CHECK_IN_NOT_STARTED, TICKET_CHECK_IN_CLOSED, TICKET_ALREADY_USED,
                     TICKET_REFUNDED ->
                     HttpStatus.CONFLICT;
+        };
+    }
+
+    private static HttpStatus statusFor(FlashPreparationErrorCode errorCode) {
+        return switch (errorCode) {
+            case FLASH_PREPARATION_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case FLASH_PREPARATION_NOT_ALLOWED, FLASH_PREPARATION_WINDOW_CLOSED,
+                    FLASH_PREPARATION_STATE_CONFLICT -> HttpStatus.CONFLICT;
+            case FLASH_SERVICE_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
         };
     }
 }

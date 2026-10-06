@@ -4,6 +4,7 @@ import java.util.Objects;
 
 import com.eventhub.event.api.OrganizerEventSessionGuardApi;
 import com.eventhub.inventory.api.InventoryManagementApi;
+import com.eventhub.inventory.api.InventoryQueryApi;
 import com.eventhub.inventory.api.InventoryRefundApi;
 import com.eventhub.inventory.api.InventoryReservationApi;
 import com.eventhub.inventory.api.command.ConfigureInventoryCommand;
@@ -18,7 +19,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public class InventoryService implements InventoryManagementApi, InventoryReservationApi, InventoryRefundApi {
+public class InventoryService implements InventoryManagementApi, InventoryQueryApi,
+        InventoryReservationApi, InventoryRefundApi {
 
     private static final String SESSION_UNIQUE_CONSTRAINT = "uk_event_inventory_session";
 
@@ -48,6 +50,18 @@ public class InventoryService implements InventoryManagementApi, InventoryReserv
             updateUnusedInventory(command);
         }
         return toView(requireInventory(command.sessionId()));
+    }
+
+    @Override
+    public InventoryView getInventory(long sessionId) {
+        if (sessionId <= 0) {
+            throw new InventoryException(InventoryErrorCode.INVENTORY_NOT_CONFIGURED);
+        }
+        InventoryEntity inventory = inventoryMapper.selectBySessionId(sessionId);
+        if (inventory == null) {
+            throw new InventoryException(InventoryErrorCode.INVENTORY_NOT_CONFIGURED);
+        }
+        return toView(inventory);
     }
 
     @Override
