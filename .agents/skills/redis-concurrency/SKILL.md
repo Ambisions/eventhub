@@ -12,11 +12,14 @@ description: >
 
 本 Skill 定义 EventHub Redis 相关任务的标准执行流程。
 
-EventHub Phase 10 的 Redis Lua Admission → synchronous MySQL Reservation 方向为
-`CURRENT PHASE / FROZEN DESIGN / NOT_IMPLEMENTED`；未来异步 Reservation 的精确
-持久化模型、字段与 `reservation_id` 尚未冻结。WaitingList capability 为
-`FUTURE / PLANNED`，具体 Schema、ZSet、资格时长和约束尚未冻结。Fixed Window
-Rate Limit 同样属于 future traffic hardening，不是 Phase 10 correctness requirement。
+EventHub Phase 10 Batch 3 的 Redis Lua Admission primitives 与 ADMIN Preparation
+已经 `COMPLETE / VERIFIED / FROZEN`。Batch 4 的 Redis admission → synchronous
+MySQL Reservation 编排与 Batch 5 的 Order lifecycle Redis synchronization 仍为
+`NOT STARTED / NOT_IMPLEMENTED`。RabbitMQ async order、Retry / DLQ 与 automatic
+reconciliation 仍为 Future；未来异步 Reservation 的精确持久化模型、字段与
+`reservation_id` 尚未冻结。WaitingList capability 为 `FUTURE / PLANNED`，具体
+Schema、ZSet、资格时长和约束尚未冻结。Fixed Window Rate Limit 同样属于 future
+traffic hardening，不是 Phase 10 correctness requirement 或 completion criterion。
 
 主要处理：
 
@@ -231,8 +234,11 @@ Phase 10 的 four-script contract 会对同一 Session 的两个 Key 执行 mult
 
 # 5. FLASH 的原子边界由 Lua 保证
 
-本节原子边界适用于 Phase 10 `CURRENT PHASE / FROZEN DESIGN / NOT_IMPLEMENTED`
-的 Redis admission，并继续适用于后续 FLASH 演进。
+本节原子边界适用于 Phase 10 Batch 3 已 `COMPLETE / VERIFIED / FROZEN` 的当前
+Production Redis admission primitives，并继续适用于后续 FLASH 演进。当前 reserve
+result contract 区分：`P:<sameAdmissionId>` → `IDEMPOTENT_PENDING`，
+`P:<differentAdmissionId>` → `ALREADY_PENDING`，`A:<orderId>` /
+`R:<orderId>` → `ALREADY_ADMITTED`。
 
 FLASH 不允许：
 

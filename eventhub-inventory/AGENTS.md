@@ -18,12 +18,15 @@
 - Session 库存
 - 库存初始化、锁定、释放和 Refund `sold → available` mutation
 
-Phase 10 的 FLASH admission stock、Lua 原子 mutation、Redis-derived admission
-state 与新请求 Fail Fast / Fail Closed 为 `CURRENT PHASE / FROZEN DESIGN /
-NOT_IMPLEMENTED`。Fixed Window Rate Limit 与 WaitingList 为 `FUTURE /
-PLANNED / NOT_IMPLEMENTED` 的流量治理能力，不是 Phase 10 correctness
-requirement。未来异步 Reservation 精确持久化模型、`reservation_id`、
-WaitingList Schema / ZSet / 资格时长与约束尚未冻结。
+Phase 10 Batch 3 的 FLASH Redis admission primitives、ADMIN Preparation、Lua
+原子 mutation、Redis-derived admission state 与新请求 Fail Fast / Fail Closed
+已经 `COMPLETE / VERIFIED / FROZEN`。Batch 4 的 Redis admission → synchronous
+MySQL Reservation 编排与 Batch 5 的 Order lifecycle Redis synchronization 仍为
+`NOT STARTED / NOT_IMPLEMENTED`。Fixed Window Rate Limit 与 WaitingList 为
+`FUTURE / PLANNED / NOT_IMPLEMENTED` 的流量治理能力，不是 Phase 10
+correctness requirement。RabbitMQ async order、Retry / DLQ 与 automatic
+reconciliation 同样仍为 Future。未来异步 Reservation 精确持久化模型、
+`reservation_id`、WaitingList Schema / ZSet / 资格时长与约束尚未冻结。
 
 本模块不负责：
 
@@ -135,9 +138,14 @@ MySQL 条件 UPDATE 负责 NORMAL 模式下的原子库存竞争控制。
 
 # 5. FLASH 抢票规则
 
-本节描述 Phase 10 `CURRENT PHASE / FROZEN DESIGN / NOT_IMPLEMENTED` 的 FLASH
-admission 核心方向，不是当前 Production behavior。未来异步 Reservation 的精确
-持久化模型、字段与 `reservation_id` 尚未冻结。
+本节描述 Phase 10 Batch 3 已 `COMPLETE / VERIFIED / FROZEN` 的当前 Production
+FLASH Redis admission primitives。Batch 4 的跨系统 FLASH Reservation 编排与
+Batch 5 的 Order lifecycle Redis synchronization 尚未实现；未来异步 Reservation
+的精确持久化模型、字段与 `reservation_id` 尚未冻结。
+
+当前 reserve result contract 区分：`P:<sameAdmissionId>` →
+`IDEMPOTENT_PENDING`，`P:<differentAdmissionId>` → `ALREADY_PENDING`，
+`A:<orderId>` / `R:<orderId>` → `ALREADY_ADMITTED`。
 
 FLASH 模式使用 Redis 作为高并发库存执行层。
 

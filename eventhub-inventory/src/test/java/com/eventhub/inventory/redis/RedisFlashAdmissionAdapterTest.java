@@ -85,6 +85,19 @@ class RedisFlashAdmissionAdapterTest {
     }
 
     @Test
+    void mapsPendingAndCompletedAdmissionRepliesWithoutAdditionalRedisReads() {
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class)))
+                .thenReturn("ALREADY_PENDING", "ALREADY_ADMITTED");
+
+        ReserveFlashAdmissionCommand command = new ReserveFlashAdmissionCommand(7, 8, "admission-2");
+        assertEquals(FlashAdmissionResult.ALREADY_PENDING, adapter.reserve(command));
+        assertEquals(FlashAdmissionResult.ALREADY_ADMITTED, adapter.reserve(command));
+
+        org.mockito.Mockito.verify(redisTemplate, org.mockito.Mockito.times(2))
+                .execute(any(RedisScript.class), anyList(), any(Object[].class));
+    }
+
+    @Test
     void translatesInfrastructureNullAndUnknownReplies() {
         when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class)))
                 .thenThrow(new DataAccessResourceFailureException("synthetic Redis failure"))

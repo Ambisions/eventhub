@@ -172,10 +172,12 @@ class FlashAdmissionRedisIntegrationTest {
         writeOpenMeta(admitted, 3, 3);
         assertThat(flashAdmissionApi.reserve(new ReserveFlashAdmissionCommand(admitted, 7, "admission-7")))
                 .isEqualTo(FlashAdmissionResult.ADMITTED);
-        assertThat(flashAdmissionApi.reserve(new ReserveFlashAdmissionCommand(admitted, 7, "admission-7")))
-                .isEqualTo(FlashAdmissionResult.IDEMPOTENT_PENDING);
-        assertThat(flashAdmissionApi.reserve(new ReserveFlashAdmissionCommand(admitted, 7, "other")))
-                .isEqualTo(FlashAdmissionResult.ALREADY_ADMITTED);
+        assertReserveNoMutation(
+                new ReserveFlashAdmissionCommand(admitted, 7, "admission-7"),
+                FlashAdmissionResult.IDEMPOTENT_PENDING);
+        assertReserveNoMutation(
+                new ReserveFlashAdmissionCommand(admitted, 7, "other"),
+                FlashAdmissionResult.ALREADY_PENDING);
         assertThat(redisTemplate.opsForHash().get(metaKey(admitted), "stock")).isEqualTo("2");
         assertThat(redisTemplate.opsForHash().get(admissionsKey(admitted), "7"))
                 .isEqualTo("P:admission-7");
@@ -287,7 +289,7 @@ class FlashAdmissionRedisIntegrationTest {
                 new ReserveFlashAdmissionCommand(sessionId, 81, "different-" + index)));
 
         assertThat(results).filteredOn(FlashAdmissionResult.ADMITTED::equals).hasSize(1);
-        assertThat(results).filteredOn(FlashAdmissionResult.ALREADY_ADMITTED::equals).hasSize(19);
+        assertThat(results).filteredOn(FlashAdmissionResult.ALREADY_PENDING::equals).hasSize(19);
         assertThat(redisTemplate.opsForHash().size(admissionsKey(sessionId))).isEqualTo(1L);
         assertStableInvariant(sessionId, 3);
     }

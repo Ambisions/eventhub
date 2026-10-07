@@ -82,7 +82,7 @@ if current then
         if identity == ARGV[2] then
             return 'IDEMPOTENT_PENDING'
         end
-        return 'ALREADY_ADMITTED'
+        return 'ALREADY_PENDING'
     end
     if prefix == 'A:' or prefix == 'R:' then
         if not is_positive_decimal(identity) then
