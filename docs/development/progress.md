@@ -779,6 +779,32 @@ Status: `COMPLETE / VERIFIED`
 - No FLASH Reservation HTTP endpoint, Order lifecycle Redis synchronization,
   RabbitMQ business flow, Rate Limit, WaitingList, or V5 migration was added.
 
-### Batch 4
+### Batch 4 — FLASH Reservation Integration
+
+Status: `COMPLETE / VERIFIED`
+
+- `eventhub-app` now owns the cross-system FLASH Reservation orchestration:
+  `Redis admission -> synchronous MySQL reservation -> Redis settle`, while
+  `eventhub-order` remains the authoritative MySQL transaction owner.
+- Only `ADMITTED` enters MySQL. Pending admission returns sanitized `503`, and an
+  already activated/released admission returns `409` without re-entering MySQL.
+- Frozen deterministic MySQL/domain rejections release the pending Redis admission;
+  compensation failure returns `503`. Ambiguous database outcomes conservatively
+  retain `P` and do not restore Redis stock.
+- A successful MySQL `WAIT_PAY` commit remains successful when Redis activation
+  cannot complete; Phase 10 intentionally provides no automatic retry, recovery,
+  reconciliation, or Order-lifecycle Redis synchronization yet.
+- Real Redis 8.2.9 + MySQL 8.4.11 verification proved the P-to-A happy path,
+  deterministic `purchase_guard` compensation, simulated ambiguous-outcome safety,
+  post-commit activation-failure behavior, capacity-one concurrency, same-user
+  concurrency, and NORMAL Reservation independence during Redis outage.
+- Fresh targeted runtime verification passed 22 tests. The final fresh Maven
+  regression passed 61 suites / 302 tests with zero failures, errors, or skips;
+  Spring Boot repackage succeeded. Formal Reviewer and Test Reviewer passed with
+  no blocking verification gap.
+- No Order/Inventory production change, Lua change, POM change, migration, RabbitMQ
+  business flow, Rate Limit, or Batch 5 lifecycle synchronization was introduced.
+
+### Batch 5 — Order Lifecycle Redis Synchronization
 
 Status: `NOT STARTED`

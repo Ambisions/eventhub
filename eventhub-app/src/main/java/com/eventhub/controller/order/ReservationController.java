@@ -1,5 +1,6 @@
 package com.eventhub.controller.order;
 
+import com.eventhub.application.flash.FlashReservationApplicationService;
 import com.eventhub.controller.order.dto.OrderResponse;
 import com.eventhub.order.api.ReservationApi;
 import com.eventhub.security.EventHubAuthenticatedUser;
@@ -16,9 +17,13 @@ import org.springframework.web.bind.annotation.RestController;
 public final class ReservationController {
 
     private final ReservationApi reservationApi;
+    private final FlashReservationApplicationService flashReservationApplicationService;
 
-    public ReservationController(ReservationApi reservationApi) {
+    public ReservationController(
+            ReservationApi reservationApi,
+            FlashReservationApplicationService flashReservationApplicationService) {
         this.reservationApi = reservationApi;
+        this.flashReservationApplicationService = flashReservationApplicationService;
     }
 
     @PostMapping("/{sessionId}/orders")
@@ -27,5 +32,13 @@ public final class ReservationController {
             @AuthenticationPrincipal EventHubAuthenticatedUser currentUser,
             @PathVariable long sessionId) {
         return OrderResponse.from(reservationApi.reserve(currentUser.userId(), sessionId));
+    }
+
+    @PostMapping("/{sessionId}/flash/reserve")
+    @ResponseStatus(HttpStatus.CREATED)
+    public OrderResponse reserveFlash(
+            @AuthenticationPrincipal EventHubAuthenticatedUser currentUser,
+            @PathVariable long sessionId) {
+        return OrderResponse.from(flashReservationApplicationService.reserve(currentUser.userId(), sessionId));
     }
 }

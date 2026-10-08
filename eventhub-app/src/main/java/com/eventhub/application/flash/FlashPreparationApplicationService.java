@@ -6,8 +6,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 
-import com.eventhub.application.flash.error.FlashPreparationErrorCode;
-import com.eventhub.application.flash.error.FlashPreparationException;
+import com.eventhub.application.flash.error.FlashErrorCode;
+import com.eventhub.application.flash.error.FlashException;
 import com.eventhub.event.api.FlashPreparationEventQueryApi;
 import com.eventhub.event.api.error.EventErrorCode;
 import com.eventhub.event.api.error.EventException;
@@ -53,7 +53,7 @@ public final class FlashPreparationApplicationService {
         LocalDateTime prepareTime = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
                 .truncatedTo(ChronoUnit.MICROS);
         if (!prepareTime.isBefore(eventContext.saleStartAt())) {
-            throw failure(FlashPreparationErrorCode.FLASH_PREPARATION_WINDOW_CLOSED);
+            throw failure(FlashErrorCode.FLASH_PREPARATION_WINDOW_CLOSED);
         }
 
         PrepareFlashAdmissionCommand command = new PrepareFlashAdmissionCommand(
@@ -65,17 +65,16 @@ public final class FlashPreparationApplicationService {
         try {
             result = flashAdmissionApi.prepare(command);
         } catch (FlashAdmissionUnavailableException exception) {
-            throw new FlashPreparationException(
-                    FlashPreparationErrorCode.FLASH_SERVICE_UNAVAILABLE, exception);
+            throw new FlashException(FlashErrorCode.FLASH_SERVICE_UNAVAILABLE, exception);
         }
         switch (result) {
             case PREPARED, IDEMPOTENT_PREPARED -> {
                 return;
             }
             case WINDOW_CLOSED -> throw failure(
-                    FlashPreparationErrorCode.FLASH_PREPARATION_WINDOW_CLOSED);
+                    FlashErrorCode.FLASH_PREPARATION_WINDOW_CLOSED);
             case STATE_CONFLICT -> throw failure(
-                    FlashPreparationErrorCode.FLASH_PREPARATION_STATE_CONFLICT);
+                    FlashErrorCode.FLASH_PREPARATION_STATE_CONFLICT);
         }
     }
 
@@ -85,8 +84,7 @@ public final class FlashPreparationApplicationService {
         } catch (EventException exception) {
             if (exception.getErrorCode() == EventErrorCode.EVENT_NOT_FOUND
                     || exception.getErrorCode() == EventErrorCode.SESSION_NOT_FOUND) {
-                throw new FlashPreparationException(
-                        FlashPreparationErrorCode.FLASH_PREPARATION_NOT_FOUND, exception);
+                throw new FlashException(FlashErrorCode.FLASH_PREPARATION_NOT_FOUND, exception);
             }
             throw exception;
         }
@@ -97,8 +95,7 @@ public final class FlashPreparationApplicationService {
             return inventoryQueryApi.getInventory(sessionId);
         } catch (InventoryException exception) {
             if (exception.getErrorCode() == InventoryErrorCode.INVENTORY_NOT_CONFIGURED) {
-                throw new FlashPreparationException(
-                        FlashPreparationErrorCode.FLASH_PREPARATION_NOT_FOUND, exception);
+                throw new FlashException(FlashErrorCode.FLASH_PREPARATION_NOT_FOUND, exception);
             }
             throw exception;
         }
@@ -107,7 +104,7 @@ public final class FlashPreparationApplicationService {
     private static void requirePublishedFlashSession(FlashPreparationEventContext context) {
         if (context.eventStatus() != EventStatus.PUBLISHED
                 || context.saleMode() != SessionSaleMode.FLASH) {
-            throw failure(FlashPreparationErrorCode.FLASH_PREPARATION_NOT_ALLOWED);
+            throw failure(FlashErrorCode.FLASH_PREPARATION_NOT_ALLOWED);
         }
     }
 
@@ -115,7 +112,7 @@ public final class FlashPreparationApplicationService {
         if (inventory.lockedStock() != 0
                 || inventory.soldStock() != 0
                 || inventory.totalStock() != inventory.availableStock()) {
-            throw failure(FlashPreparationErrorCode.FLASH_PREPARATION_NOT_ALLOWED);
+            throw failure(FlashErrorCode.FLASH_PREPARATION_NOT_ALLOWED);
         }
     }
 
@@ -126,7 +123,7 @@ public final class FlashPreparationApplicationService {
                 instant.getNano() / 1_000L);
     }
 
-    private static FlashPreparationException failure(FlashPreparationErrorCode errorCode) {
-        return new FlashPreparationException(errorCode);
+    private static FlashException failure(FlashErrorCode errorCode) {
+        return new FlashException(errorCode);
     }
 }

@@ -5,8 +5,8 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
-import com.eventhub.application.flash.error.FlashPreparationErrorCode;
-import com.eventhub.application.flash.error.FlashPreparationException;
+import com.eventhub.application.flash.error.FlashErrorCode;
+import com.eventhub.application.flash.error.FlashException;
 import com.eventhub.event.api.FlashPreparationEventQueryApi;
 import com.eventhub.event.api.error.EventErrorCode;
 import com.eventhub.event.api.error.EventException;
@@ -96,7 +96,7 @@ class FlashPreparationApplicationServiceTest {
         when(eventQueryApi.getPreparationContext(EVENT_ID, SESSION_ID))
                 .thenReturn(context(EventStatus.DRAFT, SessionSaleMode.FLASH));
 
-        assertFailure(FlashPreparationErrorCode.FLASH_PREPARATION_NOT_ALLOWED);
+        assertFailure(FlashErrorCode.FLASH_PREPARATION_NOT_ALLOWED);
 
         verifyNoInteractions(inventoryQueryApi, flashAdmissionApi, clock);
     }
@@ -105,7 +105,7 @@ class FlashPreparationApplicationServiceTest {
     void mapsMissingResourcesWithoutCallingRedis() {
         when(eventQueryApi.getPreparationContext(EVENT_ID, SESSION_ID))
                 .thenThrow(new EventException(EventErrorCode.SESSION_NOT_FOUND));
-        assertFailure(FlashPreparationErrorCode.FLASH_PREPARATION_NOT_FOUND);
+        assertFailure(FlashErrorCode.FLASH_PREPARATION_NOT_FOUND);
         verifyNoInteractions(inventoryQueryApi, flashAdmissionApi, clock);
 
         org.mockito.Mockito.reset(eventQueryApi, inventoryQueryApi, flashAdmissionApi, clock);
@@ -113,7 +113,7 @@ class FlashPreparationApplicationServiceTest {
                 .thenReturn(context(EventStatus.PUBLISHED, SessionSaleMode.FLASH));
         when(inventoryQueryApi.getInventory(SESSION_ID))
                 .thenThrow(new InventoryException(InventoryErrorCode.INVENTORY_NOT_CONFIGURED));
-        assertFailure(FlashPreparationErrorCode.FLASH_PREPARATION_NOT_FOUND);
+        assertFailure(FlashErrorCode.FLASH_PREPARATION_NOT_FOUND);
         verifyNoInteractions(flashAdmissionApi, clock);
     }
 
@@ -123,13 +123,13 @@ class FlashPreparationApplicationServiceTest {
                 .thenReturn(context(EventStatus.PUBLISHED, SessionSaleMode.FLASH));
         when(inventoryQueryApi.getInventory(SESSION_ID))
                 .thenReturn(new InventoryView(SESSION_ID, 5, 4, 1, 0, null));
-        assertFailure(FlashPreparationErrorCode.FLASH_PREPARATION_NOT_ALLOWED);
+        assertFailure(FlashErrorCode.FLASH_PREPARATION_NOT_ALLOWED);
         verifyNoInteractions(flashAdmissionApi, clock);
 
         org.mockito.Mockito.reset(inventoryQueryApi, flashAdmissionApi, clock);
         when(inventoryQueryApi.getInventory(SESSION_ID)).thenReturn(cleanInventory());
         when(clock.instant()).thenReturn(SALE_START.toInstant(ZoneOffset.UTC));
-        assertFailure(FlashPreparationErrorCode.FLASH_PREPARATION_WINDOW_CLOSED);
+        assertFailure(FlashErrorCode.FLASH_PREPARATION_WINDOW_CLOSED);
         verify(flashAdmissionApi, never()).prepare(org.mockito.ArgumentMatchers.any());
     }
 
@@ -144,9 +144,9 @@ class FlashPreparationApplicationServiceTest {
                 .thenThrow(new FlashAdmissionUnavailableException("synthetic"));
 
         service.prepare(EVENT_ID, SESSION_ID);
-        assertFailure(FlashPreparationErrorCode.FLASH_PREPARATION_WINDOW_CLOSED);
-        assertFailure(FlashPreparationErrorCode.FLASH_PREPARATION_STATE_CONFLICT);
-        assertFailure(FlashPreparationErrorCode.FLASH_SERVICE_UNAVAILABLE);
+        assertFailure(FlashErrorCode.FLASH_PREPARATION_WINDOW_CLOSED);
+        assertFailure(FlashErrorCode.FLASH_PREPARATION_STATE_CONFLICT);
+        assertFailure(FlashErrorCode.FLASH_SERVICE_UNAVAILABLE);
     }
 
     private void givenEligible() {
@@ -165,9 +165,9 @@ class FlashPreparationApplicationServiceTest {
         return new InventoryView(SESSION_ID, 5, 5, 0, 0, null);
     }
 
-    private void assertFailure(FlashPreparationErrorCode expected) {
-        FlashPreparationException exception = assertThrows(
-                FlashPreparationException.class,
+    private void assertFailure(FlashErrorCode expected) {
+        FlashException exception = assertThrows(
+                FlashException.class,
                 () -> service.prepare(EVENT_ID, SESSION_ID));
         assertEquals(expected, exception.getErrorCode());
     }

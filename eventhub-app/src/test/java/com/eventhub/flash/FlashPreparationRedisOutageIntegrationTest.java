@@ -55,6 +55,9 @@ class FlashPreparationRedisOutageIntegrationTest {
     void cleanup() {
         if (!sessionIds.isEmpty()) {
             jdbcTemplate.batchUpdate(
+                    "DELETE FROM ticket_order WHERE session_id = ?",
+                    sessionIds.stream().map(id -> new Object[]{id}).toList());
+            jdbcTemplate.batchUpdate(
                     "DELETE FROM event_inventory WHERE session_id = ?",
                     sessionIds.stream().map(id -> new Object[]{id}).toList());
             jdbcTemplate.batchUpdate(
@@ -84,6 +87,37 @@ class FlashPreparationRedisOutageIntegrationTest {
 
         assertThat(response)
                 .doesNotContain("127.0.0.1", "6379", "RedisConnection", "DataAccess", "Exception");
+
+        String reservationResponse = mockMvc.perform(post("/api/sessions/{sessionId}/flash/reserve",
+                                fixture.sessionId())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("FLASH_SERVICE_UNAVAILABLE"))
+                .andExpect(jsonPath("$.message").value("FLASH service is unavailable"))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(reservationResponse)
+                .doesNotContain("127.0.0.1", "6379", "RedisConnection", "DataAccess", "Exception");
+        assertThat(orderCount(fixture.sessionId())).isZero();
+    }
+
+    @Test
+    void normalReservationRemainsIndependentWhenRedisIsUnavailable() throws Exception {
+        Fixture fixture = normalFixture();
+
+        mockMvc.perform(post("/api/sessions/{sessionId}/orders", fixture.sessionId())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("WAIT_PAY"));
+
+        assertThat(orderCount(fixture.sessionId())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT available_stock FROM event_inventory WHERE session_id = ?",
+                Integer.class,
+                fixture.sessionId())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT locked_stock FROM event_inventory WHERE session_id = ?",
+                Integer.class,
+                fixture.sessionId())).isEqualTo(1);
     }
 
     private Fixture fixture() {
@@ -113,6 +147,41 @@ class FlashPreparationRedisOutageIntegrationTest {
                 VALUES (?, 2, 2, 0, 0)
                 """, sessionId);
         return new Fixture(eventId, sessionId);
+    }
+
+    private Fixture normalFixture() {
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        String title = "phase10-outage-normal-" + suffix;
+        jdbcTemplate.update(
+                "INSERT INTO events (organizer_user_id, title, status) VALUES (?, ?, 'PUBLISHED')",
+                9901L, title);
+        long eventId = jdbcTemplate.queryForObject(
+                "SELECT id FROM events WHERE title = ?", Long.class, title);
+        eventIds.add(eventId);
+
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        String sessionName = "phase10-outage-normal-session-" + suffix;
+        jdbcTemplate.update("""
+                INSERT INTO event_sessions (
+                    event_id, name, sale_mode, sale_start_at, sale_end_at, start_at, end_at)
+                VALUES (?, ?, 'NORMAL', ?, ?, ?, ?)
+                """, eventId, sessionName, now.minusMinutes(5), now.plusMinutes(5),
+                now.plusHours(2), now.plusHours(3));
+        long sessionId = jdbcTemplate.queryForObject(
+                "SELECT id FROM event_sessions WHERE name = ?", Long.class, sessionName);
+        sessionIds.add(sessionId);
+        jdbcTemplate.update("""
+                INSERT INTO event_inventory (
+                    session_id, total_stock, available_stock, locked_stock, sold_stock)
+                VALUES (?, 2, 2, 0, 0)
+                """, sessionId);
+        return new Fixture(eventId, sessionId);
+    }
+
+    private long orderCount(long sessionId) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ticket_order WHERE session_id = ?", Long.class, sessionId);
+        return count == null ? 0L : count;
     }
 
     private String bearerToken() {

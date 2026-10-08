@@ -2,8 +2,8 @@ package com.eventhub.handler;
 
 import com.eventhub.application.checkin.error.CheckInErrorCode;
 import com.eventhub.application.checkin.error.CheckInException;
-import com.eventhub.application.flash.error.FlashPreparationErrorCode;
-import com.eventhub.application.flash.error.FlashPreparationException;
+import com.eventhub.application.flash.error.FlashErrorCode;
+import com.eventhub.application.flash.error.FlashException;
 import com.eventhub.auth.api.error.AuthErrorCode;
 import com.eventhub.auth.api.error.AuthException;
 import com.eventhub.event.api.error.EventErrorCode;
@@ -82,9 +82,8 @@ public final class GlobalExceptionHandler {
                 exception.getErrorCode().getCode(), exception.getMessage()));
     }
 
-    @ExceptionHandler(FlashPreparationException.class)
-    public ResponseEntity<ApiErrorResponse> handleFlashPreparationException(
-            FlashPreparationException exception) {
+    @ExceptionHandler(FlashException.class)
+    public ResponseEntity<ApiErrorResponse> handleFlashException(FlashException exception) {
         return ResponseEntity.status(statusFor(exception.getErrorCode())).body(new ApiErrorResponse(
                 exception.getErrorCode().getCode(), exception.getMessage()));
     }
@@ -158,11 +157,11 @@ public final class GlobalExceptionHandler {
         };
     }
 
-    private static HttpStatus statusFor(FlashPreparationErrorCode errorCode) {
+    private static HttpStatus statusFor(FlashErrorCode errorCode) {
         return switch (errorCode) {
             case FLASH_PREPARATION_NOT_FOUND -> HttpStatus.NOT_FOUND;
             case FLASH_PREPARATION_NOT_ALLOWED, FLASH_PREPARATION_WINDOW_CLOSED,
-                    FLASH_PREPARATION_STATE_CONFLICT -> HttpStatus.CONFLICT;
+                    FLASH_PREPARATION_STATE_CONFLICT, FLASH_ALREADY_ADMITTED -> HttpStatus.CONFLICT;
             case FLASH_SERVICE_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
         };
     }

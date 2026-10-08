@@ -109,7 +109,11 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/events/*/sessions/*/flash/prepare")
                         .hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/events/**", "/api/sessions/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/sessions/*/orders").authenticated()
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/sessions/*/orders",
+                                "/api/sessions/*/flash/reserve")
+                        .authenticated()
                         .requestMatchers("/api/orders/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/tickets/*/check-in").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/tickets/*").authenticated()
