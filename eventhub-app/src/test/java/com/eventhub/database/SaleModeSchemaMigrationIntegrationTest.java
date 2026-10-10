@@ -35,7 +35,7 @@ class SaleModeSchemaMigrationIntegrationTest {
     void recordsV4AndExposesTheFrozenSaleModeMetadata() {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM flyway_schema_history WHERE success = TRUE", Integer.class))
-                .isEqualTo(4);
+                .isEqualTo(5);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM flyway_schema_history WHERE success = FALSE", Integer.class))
                 .isZero();

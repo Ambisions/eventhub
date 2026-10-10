@@ -853,3 +853,33 @@ Status: `COMPLETE / VERIFIED / FROZEN`
 - Phase 10 intentionally leaves RabbitMQ asynchronous ordering, Transactional
   Outbox, Retry/DLQ, automatic reconciliation and Redis crash recovery, Rate Limit,
   and WaitingList as future work.
+
+## Phase 11 — RabbitMQ Notification Foundation
+
+Status: `IN PROGRESS`
+
+### Batch 1 — Contract / Architecture
+
+Status: `COMPLETE / FROZEN`
+
+### Batch 2 — V5 + Notification Foundation
+
+Status: `COMPLETE / VERIFIED`
+
+- Flyway V5 creates only the `user_notification` persistence foundation. Fresh
+  MySQL 8.4.11 verification applied V1 through V5 from zero business tables,
+  verified the frozen metadata and constraint behavior, and confirmed a stable
+  second startup at version 5.
+- `eventhub-notification` owns the frozen `TicketIssuedEvent` JSON contract,
+  durable direct RabbitMQ topology, publisher adapter, persistence entity, and
+  MyBatis mapper. No Consumer or payment integration was introduced.
+- Real RabbitMQ 4.3.5 verification proved the exact exchange, queue, binding,
+  routing key, JSON/Instant round-trip, and persistent delivery, with zero queue
+  or connection residue.
+- The fresh Root + 9 Module `clean verify` passed 69 suites / 331 tests with zero
+  failures, errors, or skips; Spring Boot repackage succeeded. Formal Reviewer
+  and Test Reviewer passed with no findings or blocking verification gap.
+
+### Batch 3 — Payment Notification Orchestration
+
+Status: `NOT STARTED`
