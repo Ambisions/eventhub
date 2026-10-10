@@ -16,13 +16,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.eventhub.inventory.api.FlashAdmissionApi;
+import com.eventhub.inventory.api.FlashOrderLifecycleApi;
 import com.eventhub.inventory.api.command.ActivateFlashAdmissionCommand;
 import com.eventhub.inventory.api.command.PrepareFlashAdmissionCommand;
 import com.eventhub.inventory.api.command.ReleasePendingFlashAdmissionCommand;
 import com.eventhub.inventory.api.command.ReserveFlashAdmissionCommand;
+import com.eventhub.inventory.api.command.FlashOrderLifecycleCommand;
 import com.eventhub.inventory.api.model.FlashAdmissionResult;
 import com.eventhub.inventory.api.model.FlashPrepareResult;
 import com.eventhub.inventory.api.model.FlashReservationSettleResult;
+import com.eventhub.inventory.api.model.FlashOrderLifecycleResult;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,6 +46,9 @@ class FlashAdmissionRedisIntegrationTest {
 
     @Autowired
     private FlashAdmissionApi flashAdmissionApi;
+
+    @Autowired
+    private FlashOrderLifecycleApi flashOrderLifecycleApi;
 
     @Autowired
     private StringRedisTemplate redisTemplate;
@@ -294,6 +300,99 @@ class FlashAdmissionRedisIntegrationTest {
         assertStableInvariant(sessionId, 3);
     }
 
+    @Test
+    void lifecycleReleaseAndRefundAreAtomicIdempotentAndCapacityBounded() {
+        long release = nextSession();
+        writeOpenMeta(release, 3, 2);
+        redisTemplate.opsForHash().put(admissionsKey(release), "71", "A:701");
+
+        assertThat(flashOrderLifecycleApi.releaseActive(
+                new FlashOrderLifecycleCommand(release, 71, 701)))
+                .isEqualTo(FlashOrderLifecycleResult.RELEASED);
+        assertThat(redisTemplate.opsForHash().get(metaKey(release), "stock")).isEqualTo("3");
+        assertThat(redisTemplate.opsForHash().hasKey(admissionsKey(release), "71")).isFalse();
+        assertLifecycleNoMutation(release,
+                () -> flashOrderLifecycleApi.releaseActive(
+                        new FlashOrderLifecycleCommand(release, 71, 701)),
+                FlashOrderLifecycleResult.IDEMPOTENT_RELEASED);
+
+        long refund = nextSession();
+        writeOpenMeta(refund, 3, 2);
+        redisTemplate.opsForHash().put(admissionsKey(refund), "72", "A:702");
+
+        assertThat(flashOrderLifecycleApi.refundActive(
+                new FlashOrderLifecycleCommand(refund, 72, 702)))
+                .isEqualTo(FlashOrderLifecycleResult.REFUNDED);
+        assertThat(redisTemplate.opsForHash().get(metaKey(refund), "stock")).isEqualTo("3");
+        assertThat(redisTemplate.opsForHash().get(admissionsKey(refund), "72")).isEqualTo("R:702");
+        assertLifecycleNoMutation(refund,
+                () -> flashOrderLifecycleApi.refundActive(
+                        new FlashOrderLifecycleCommand(refund, 72, 702)),
+                FlashOrderLifecycleResult.IDEMPOTENT_REFUNDED);
+
+        long capacityBound = nextSession();
+        writeOpenMeta(capacityBound, 1, 1);
+        redisTemplate.opsForHash().put(admissionsKey(capacityBound), "73", "A:703");
+        assertLifecycleNoMutation(capacityBound,
+                () -> flashOrderLifecycleApi.releaseActive(
+                        new FlashOrderLifecycleCommand(capacityBound, 73, 703)),
+                FlashOrderLifecycleResult.STATE_CONFLICT);
+        assertLifecycleNoMutation(capacityBound,
+                () -> flashOrderLifecycleApi.refundActive(
+                        new FlashOrderLifecycleCommand(capacityBound, 73, 703)),
+                FlashOrderLifecycleResult.STATE_CONFLICT);
+    }
+
+    @Test
+    void lifecycleFencingAndMalformedStatesNeverMutateRedis() {
+        long sessionId = nextSession();
+        writeOpenMeta(sessionId, 10, 5);
+        redisTemplate.opsForHash().put(admissionsKey(sessionId), "81", "P:pending-81");
+        redisTemplate.opsForHash().put(admissionsKey(sessionId), "82", "A:999");
+        redisTemplate.opsForHash().put(admissionsKey(sessionId), "83", "R:999");
+        redisTemplate.opsForHash().put(admissionsKey(sessionId), "84", "broken");
+
+        for (String operation : List.of("RELEASE", "REFUND")) {
+            assertLifecycleNoMutation(sessionId,
+                    () -> lifecycle(operation, sessionId, 81, 801),
+                    FlashOrderLifecycleResult.FENCE_CONFLICT);
+            assertLifecycleNoMutation(sessionId,
+                    () -> lifecycle(operation, sessionId, 82, 802),
+                    FlashOrderLifecycleResult.FENCE_CONFLICT);
+            assertLifecycleNoMutation(sessionId,
+                    () -> lifecycle(operation, sessionId, 83, 803),
+                    FlashOrderLifecycleResult.FENCE_CONFLICT);
+            assertLifecycleNoMutation(sessionId,
+                    () -> lifecycle(operation, sessionId, 84, 804),
+                    FlashOrderLifecycleResult.STATE_CONFLICT);
+        }
+
+        assertLifecycleNoMutation(sessionId,
+                () -> flashOrderLifecycleApi.refundActive(
+                        new FlashOrderLifecycleCommand(sessionId, 85, 805)),
+                FlashOrderLifecycleResult.FENCE_CONFLICT);
+
+        long missing = nextSession();
+        assertLifecycleNoMutation(missing,
+                () -> flashOrderLifecycleApi.releaseActive(
+                        new FlashOrderLifecycleCommand(missing, 86, 806)),
+                FlashOrderLifecycleResult.NOT_PREPARED);
+
+        for (Map<String, String> malformed : List.of(
+                Map.of("state", "BROKEN", "capacity", "2", "stock", "1"),
+                Map.of("state", "PREPARED", "capacity", "bad", "stock", "1"),
+                Map.of("state", "PREPARED", "capacity", "2", "stock", "bad"),
+                Map.of("state", "PREPARED", "capacity", "2", "stock", "3"))) {
+            long malformedSession = nextSession();
+            redisTemplate.opsForHash().putAll(metaKey(malformedSession), malformed);
+            redisTemplate.opsForHash().put(admissionsKey(malformedSession), "87", "A:807");
+            assertLifecycleNoMutation(malformedSession,
+                    () -> flashOrderLifecycleApi.releaseActive(
+                            new FlashOrderLifecycleCommand(malformedSession, 87, 807)),
+                    FlashOrderLifecycleResult.STATE_CONFLICT);
+        }
+    }
+
     private void assertMalformedPrepareState(
             String scenario, Map<String, String> state, long startUs, long endUs) {
         long sessionId = nextSession();
@@ -330,6 +429,23 @@ class FlashAdmissionRedisIntegrationTest {
         RedisState before = snapshot(sessionId);
         assertThat(flashAdmissionApi.activate(new ActivateFlashAdmissionCommand(
                 sessionId, userId, admissionId, orderId))).isEqualTo(expected);
+        assertUnchanged(sessionId, before);
+    }
+
+    private FlashOrderLifecycleResult lifecycle(
+            String operation, long sessionId, long userId, long orderId) {
+        FlashOrderLifecycleCommand command = new FlashOrderLifecycleCommand(sessionId, userId, orderId);
+        return operation.equals("RELEASE")
+                ? flashOrderLifecycleApi.releaseActive(command)
+                : flashOrderLifecycleApi.refundActive(command);
+    }
+
+    private void assertLifecycleNoMutation(
+            long sessionId,
+            LifecycleOperation operation,
+            FlashOrderLifecycleResult expected) {
+        RedisState before = snapshot(sessionId);
+        assertThat(operation.execute()).isEqualTo(expected);
         assertUnchanged(sessionId, before);
     }
 
@@ -453,6 +569,11 @@ class FlashAdmissionRedisIntegrationTest {
     @FunctionalInterface
     private interface IndexedOperation {
         FlashAdmissionResult execute(int index);
+    }
+
+    @FunctionalInterface
+    private interface LifecycleOperation {
+        FlashOrderLifecycleResult execute();
     }
 
     private record RedisState(Map<String, String> meta, Map<String, String> admissions) {

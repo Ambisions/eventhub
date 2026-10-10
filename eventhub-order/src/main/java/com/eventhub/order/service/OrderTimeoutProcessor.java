@@ -2,8 +2,10 @@ package com.eventhub.order.service;
 
 import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.Optional;
 
 import com.eventhub.inventory.api.InventoryReservationApi;
+import com.eventhub.order.api.model.ClosedOrderLifecycleView;
 import com.eventhub.order.mapper.OrderMapper;
 import com.eventhub.order.repository.OrderEntity;
 import org.springframework.stereotype.Service;
@@ -24,22 +26,25 @@ public class OrderTimeoutProcessor {
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public boolean closeExpiredOrder(long orderId, LocalDateTime scanNow) {
+    public Optional<ClosedOrderLifecycleView> closeExpiredOrder(long orderId, LocalDateTime scanNow) {
         Objects.requireNonNull(scanNow, "scanNow must not be null");
         OrderEntity order = orderMapper.selectOrderById(orderId);
         if (order == null) {
-            return false;
+            return Optional.empty();
         }
 
         int affectedRows = orderMapper.closeIfWaitPayAndExpired(orderId, scanNow);
         if (affectedRows == 0) {
-            return false;
+            return Optional.empty();
         }
         if (affectedRows != 1) {
             throw new IllegalStateException("Timeout update affected an unexpected number of rows");
         }
 
         inventoryReservationApi.releaseOne(order.getSessionId());
-        return true;
+        return Optional.of(new ClosedOrderLifecycleView(
+                order.getId(),
+                order.getUserId(),
+                order.getSessionId()));
     }
 }

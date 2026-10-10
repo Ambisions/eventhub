@@ -4,9 +4,11 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 
 import com.eventhub.order.api.OrderTimeoutApi;
+import com.eventhub.order.api.model.ClosedOrderLifecycleView;
 import com.eventhub.order.api.model.TimeoutBatchResult;
 import com.eventhub.order.mapper.OrderMapper;
 import org.apache.commons.logging.Log;
@@ -40,19 +42,21 @@ public class OrderTimeoutService implements OrderTimeoutApi {
         LocalDateTime scanNow = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
                 .truncatedTo(ChronoUnit.MICROS);
         List<Long> orderIds = orderMapper.findExpiredWaitPayIds(scanNow, batchSize);
-        int closed = 0;
+        List<ClosedOrderLifecycleView> closedOrders = new ArrayList<>();
         for (Long orderId : orderIds) {
             try {
-                if (orderTimeoutProcessor.closeExpiredOrder(orderId, scanNow)) {
-                    closed++;
-                }
+                orderTimeoutProcessor.closeExpiredOrder(orderId, scanNow)
+                        .ifPresent(closedOrders::add);
             } catch (RuntimeException exception) {
                 LOGGER.error("Failed to close expired order " + orderId
                         + " (" + exception.getClass().getSimpleName() + ")", exception);
             }
         }
 
-        TimeoutBatchResult result = new TimeoutBatchResult(orderIds.size(), closed);
+        TimeoutBatchResult result = new TimeoutBatchResult(
+                orderIds.size(),
+                closedOrders.size(),
+                closedOrders);
         LOGGER.info("Timeout batch completed: scanned=" + result.scanned()
                 + ", closed=" + result.closed());
         return result;

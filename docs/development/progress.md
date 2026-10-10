@@ -807,4 +807,30 @@ Status: `COMPLETE / VERIFIED`
 
 ### Batch 5 — Order Lifecycle Redis Synchronization
 
+Status: `COMPLETE / VERIFIED`
+
+- MySQL remains the authoritative lifecycle ledger. After a successful database commit,
+  `eventhub-app` performs best-effort FLASH Redis synchronization through the
+  `eventhub-inventory` public API; Redis or Event lookup failure does not reverse the
+  committed database result.
+- Cancel and Timeout atomically remove `A:<orderId>` and restore one Redis stock unit.
+  Refund atomically changes `A:<orderId>` to `R:<orderId>` and restores one stock unit;
+  repeated lifecycle calls are idempotent, and `P` / mismatched / malformed states are
+  fenced without mutation.
+- Real Redis 8.2.9 + MySQL 8.4.11 verification covered Cancel, Timeout, Refund, repeated
+  Refund repair, `R` admission blocking, P-state compatibility, post-commit failure
+  preservation, and NORMAL Cancel/Timeout/Refund with Redis stopped.
+- Fresh targeted verification passed 18 unit tests, 19 Redis/MySQL integration tests,
+  one Redis-down NORMAL integration test, and 32 MySQL lifecycle/concurrency regression
+  tests, all without failures, errors, or skips.
+- The final fresh Root + 9 Module `clean verify` passed 64 suites / 321 tests with zero
+  failures, errors, or skips; Spring Boot repackage succeeded. Formal Reviewer reported
+  no findings, and the Phase-level Test Reviewer marked all 22 audited properties
+  `PROVEN` with no blocking verification gap.
+- No Pay Redis mutation, RabbitMQ business flow, Outbox, Retry/DLQ, automatic
+  reconciliation, Rate Limit, WaitingList, POM/Security change, or V5 migration was
+  introduced.
+
+### Batch 6
+
 Status: `NOT STARTED`

@@ -7,9 +7,11 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.eventhub.order.mapper.OrderMapper;
+import com.eventhub.order.api.model.ClosedOrderLifecycleView;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -51,16 +53,21 @@ class OrderTimeoutServiceTest {
                 .truncatedTo(ChronoUnit.MICROS);
         when(orderMapper.findExpiredWaitPayIds(expectedScanNow, 4))
                 .thenReturn(List.of(11L, 12L, 13L, 14L));
-        when(processor.closeExpiredOrder(11L, expectedScanNow)).thenReturn(true);
-        when(processor.closeExpiredOrder(12L, expectedScanNow)).thenReturn(false);
+        ClosedOrderLifecycleView first = new ClosedOrderLifecycleView(11L, 101L, 201L);
+        ClosedOrderLifecycleView second = new ClosedOrderLifecycleView(14L, 104L, 204L);
+        when(processor.closeExpiredOrder(11L, expectedScanNow)).thenReturn(Optional.of(first));
+        when(processor.closeExpiredOrder(12L, expectedScanNow)).thenReturn(Optional.empty());
         when(processor.closeExpiredOrder(13L, expectedScanNow))
                 .thenThrow(new IllegalStateException("synthetic processor failure"));
-        when(processor.closeExpiredOrder(14L, expectedScanNow)).thenReturn(true);
+        when(processor.closeExpiredOrder(14L, expectedScanNow)).thenReturn(Optional.of(second));
 
         var result = service.processExpiredBatch(4);
 
         assertEquals(4, result.scanned());
         assertEquals(2, result.closed());
+        assertEquals(List.of(first, second), result.closedOrders());
+        assertThrows(UnsupportedOperationException.class,
+                () -> result.closedOrders().add(new ClosedOrderLifecycleView(15L, 105L, 205L)));
         assertEquals(1, clock.instantCalls());
         ArgumentCaptor<LocalDateTime> scanCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(orderMapper, times(1)).findExpiredWaitPayIds(scanCaptor.capture(), org.mockito.ArgumentMatchers.eq(4));

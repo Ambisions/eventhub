@@ -17,6 +17,9 @@ import com.eventhub.auth.api.model.AccessTokenContract;
 import com.eventhub.inventory.api.FlashAdmissionApi;
 import com.eventhub.inventory.api.command.ReserveFlashAdmissionCommand;
 import com.eventhub.inventory.api.model.FlashAdmissionResult;
+import com.eventhub.order.api.OrderTimeoutApi;
+import com.eventhub.application.flash.FlashOrderLifecycleApplicationService;
+import com.eventhub.scheduler.OrderTimeoutScheduler;
 import com.eventhub.user.api.model.UserRole;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -62,6 +65,12 @@ class FlashReservationIntegrationTest {
 
     @Autowired
     private FlashAdmissionApi flashAdmissionApi;
+
+    @Autowired
+    private OrderTimeoutApi orderTimeoutApi;
+
+    @Autowired
+    private FlashOrderLifecycleApplicationService flashOrderLifecycleApplicationService;
 
     @Autowired
     private JwtEncoder jwtEncoder;
@@ -227,6 +236,208 @@ class FlashReservationIntegrationTest {
         assertInventoryInvariant(fixture.sessionId());
     }
 
+    @Test
+    void cancelAndTimeoutSynchronizeFlashRedisOnlyAfterDatabaseSuccess() throws Exception {
+        Fixture cancelFixture = fixture("lifecycle-cancel", 2, Window.OPEN);
+        Identity cancelUser = identity("lifecycle-cancel", UserRole.USER);
+        prepareRedis(cancelFixture, 2, Window.OPEN);
+        long cancelOrderId = reserve(cancelFixture, cancelUser);
+
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", cancelOrderId)
+                        .header(HttpHeaders.AUTHORIZATION, cancelUser.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        assertThat(orderStatus(cancelOrderId)).isEqualTo("CANCELLED");
+        assertThat(inventory(cancelFixture.sessionId())).isEqualTo(new InventoryState(2, 2, 0, 0));
+        assertThat(redisTemplate.opsForHash().get(metaKey(cancelFixture.sessionId()), "stock"))
+                .isEqualTo("2");
+        assertThat(redisTemplate.opsForHash().hasKey(
+                admissionsKey(cancelFixture.sessionId()), Long.toString(cancelUser.userId()))).isFalse();
+
+        Fixture timeoutFixture = fixture("lifecycle-timeout", 2, Window.OPEN);
+        Identity timeoutUser = identity("lifecycle-timeout", UserRole.USER);
+        prepareRedis(timeoutFixture, 2, Window.OPEN);
+        long timeoutOrderId = reserve(timeoutFixture, timeoutUser);
+        jdbcTemplate.update("UPDATE ticket_order SET expire_at = ? WHERE id = ?",
+                LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1), timeoutOrderId);
+
+        new OrderTimeoutScheduler(orderTimeoutApi, flashOrderLifecycleApplicationService, 100)
+                .processExpiredOrders();
+
+        assertThat(orderStatus(timeoutOrderId)).isEqualTo("CLOSED");
+        assertThat(inventory(timeoutFixture.sessionId())).isEqualTo(new InventoryState(2, 2, 0, 0));
+        assertThat(redisTemplate.opsForHash().get(metaKey(timeoutFixture.sessionId()), "stock"))
+                .isEqualTo("2");
+        assertThat(redisTemplate.opsForHash().hasKey(
+                admissionsKey(timeoutFixture.sessionId()), Long.toString(timeoutUser.userId()))).isFalse();
+    }
+
+    @Test
+    void refundTransitionsAdmissionToHistoricalFenceAndBlocksFutureAdmission() throws Exception {
+        Fixture fixture = fixture("lifecycle-refund", 2, Window.OPEN);
+        Identity user = identity("lifecycle-refund", UserRole.USER);
+        prepareRedis(fixture, 2, Window.OPEN);
+        long orderId = reserve(fixture, user);
+
+        mockMvc.perform(post("/api/orders/{orderId}/pay", orderId)
+                        .header(HttpHeaders.AUTHORIZATION, user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.order.status").value("PAID"));
+        assertThat(redisTemplate.opsForHash().get(
+                admissionsKey(fixture.sessionId()), Long.toString(user.userId())))
+                .isEqualTo("A:" + orderId);
+
+        mockMvc.perform(post("/api/orders/{orderId}/refund", orderId)
+                        .header(HttpHeaders.AUTHORIZATION, user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REFUNDED"));
+
+        assertThat(orderStatus(orderId)).isEqualTo("REFUNDED");
+        assertThat(ticketStatus(orderId)).isEqualTo("REFUNDED");
+        assertThat(inventory(fixture.sessionId())).isEqualTo(new InventoryState(2, 2, 0, 0));
+        assertThat(redisTemplate.opsForHash().get(metaKey(fixture.sessionId()), "stock")).isEqualTo("2");
+        assertThat(redisTemplate.opsForHash().get(
+                admissionsKey(fixture.sessionId()), Long.toString(user.userId())))
+                .isEqualTo("R:" + orderId);
+
+        mockMvc.perform(post(path(fixture)).header(HttpHeaders.AUTHORIZATION, user.token()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("FLASH_ALREADY_ADMITTED"));
+        assertInventoryInvariant(fixture.sessionId());
+    }
+
+    @Test
+    void repeatedRefundRepairsFirstPostCommitRedisFailureWithoutRepeatingDatabaseEffects() throws Exception {
+        Fixture fixture = fixture("refund-repair", 2, Window.OPEN);
+        Identity user = identity("refund-repair", UserRole.USER);
+        prepareRedis(fixture, 2, Window.OPEN);
+        long orderId = reserve(fixture, user);
+        mockMvc.perform(post("/api/orders/{orderId}/pay", orderId)
+                        .header(HttpHeaders.AUTHORIZATION, user.token()))
+                .andExpect(status().isOk());
+
+        redisTemplate.opsForHash().put(metaKey(fixture.sessionId()), "state", "BROKEN");
+        mockMvc.perform(post("/api/orders/{orderId}/refund", orderId)
+                        .header(HttpHeaders.AUTHORIZATION, user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REFUNDED"));
+
+        assertThat(orderStatus(orderId)).isEqualTo("REFUNDED");
+        assertThat(ticketStatus(orderId)).isEqualTo("REFUNDED");
+        assertThat(inventory(fixture.sessionId())).isEqualTo(new InventoryState(2, 2, 0, 0));
+        assertThat(redisTemplate.opsForHash().get(metaKey(fixture.sessionId()), "stock")).isEqualTo("1");
+        assertThat(redisTemplate.opsForHash().get(
+                admissionsKey(fixture.sessionId()), Long.toString(user.userId())))
+                .isEqualTo("A:" + orderId);
+
+        redisTemplate.opsForHash().put(metaKey(fixture.sessionId()), "state", "PREPARED");
+        mockMvc.perform(post("/api/orders/{orderId}/refund", orderId)
+                        .header(HttpHeaders.AUTHORIZATION, user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REFUNDED"));
+
+        assertThat(inventory(fixture.sessionId())).isEqualTo(new InventoryState(2, 2, 0, 0));
+        assertThat(redisTemplate.opsForHash().get(metaKey(fixture.sessionId()), "stock")).isEqualTo("2");
+        assertThat(redisTemplate.opsForHash().get(
+                admissionsKey(fixture.sessionId()), Long.toString(user.userId())))
+                .isEqualTo("R:" + orderId);
+        assertThat(count("SELECT COUNT(*) FROM ticket WHERE order_id = ?", orderId)).isEqualTo(1);
+    }
+
+    @Test
+    void pendingAdmissionIsNeverMutatedByCancelTimeoutOrRefundLifecycleSync() throws Exception {
+        Fixture cancelFixture = fixture("pending-cancel", 2, Window.OPEN);
+        Identity cancelUser = identity("pending-cancel", UserRole.USER);
+        prepareRedis(cancelFixture, 2, Window.OPEN);
+        long cancelOrder = reserve(cancelFixture, cancelUser);
+        forcePending(cancelFixture, cancelUser, "cancel-pending");
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", cancelOrder)
+                        .header(HttpHeaders.AUTHORIZATION, cancelUser.token()))
+                .andExpect(status().isOk());
+        assertPendingUnchanged(cancelFixture, cancelUser, "cancel-pending", "1");
+        assertThat(orderStatus(cancelOrder)).isEqualTo("CANCELLED");
+
+        Fixture timeoutFixture = fixture("pending-timeout", 2, Window.OPEN);
+        Identity timeoutUser = identity("pending-timeout", UserRole.USER);
+        prepareRedis(timeoutFixture, 2, Window.OPEN);
+        long timeoutOrder = reserve(timeoutFixture, timeoutUser);
+        forcePending(timeoutFixture, timeoutUser, "timeout-pending");
+        jdbcTemplate.update("UPDATE ticket_order SET expire_at = ? WHERE id = ?",
+                LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1), timeoutOrder);
+        new OrderTimeoutScheduler(orderTimeoutApi, flashOrderLifecycleApplicationService, 100)
+                .processExpiredOrders();
+        assertPendingUnchanged(timeoutFixture, timeoutUser, "timeout-pending", "1");
+        assertThat(orderStatus(timeoutOrder)).isEqualTo("CLOSED");
+
+        Fixture refundFixture = fixture("pending-refund", 2, Window.OPEN);
+        Identity refundUser = identity("pending-refund", UserRole.USER);
+        prepareRedis(refundFixture, 2, Window.OPEN);
+        long refundOrder = reserve(refundFixture, refundUser);
+        mockMvc.perform(post("/api/orders/{orderId}/pay", refundOrder)
+                        .header(HttpHeaders.AUTHORIZATION, refundUser.token()))
+                .andExpect(status().isOk());
+        forcePending(refundFixture, refundUser, "refund-pending");
+        mockMvc.perform(post("/api/orders/{orderId}/refund", refundOrder)
+                        .header(HttpHeaders.AUTHORIZATION, refundUser.token()))
+                .andExpect(status().isOk());
+        assertPendingUnchanged(refundFixture, refundUser, "refund-pending", "1");
+        assertThat(orderStatus(refundOrder)).isEqualTo("REFUNDED");
+    }
+
+    @Test
+    void eventLookupFailureAfterCancelCommitDoesNotReplaceHttpSuccess() throws Exception {
+        Fixture fixture = fixture("event-query-failure", 1, Window.OPEN);
+        Identity user = identity("event-query-failure", UserRole.USER);
+        prepareRedis(fixture, 1, Window.OPEN);
+        long orderId = reserve(fixture, user);
+        jdbcTemplate.update("UPDATE events SET status = 'DRAFT' WHERE id = ?", fixture.eventId());
+
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", orderId)
+                        .header(HttpHeaders.AUTHORIZATION, user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        assertThat(orderStatus(orderId)).isEqualTo("CANCELLED");
+        assertThat(inventory(fixture.sessionId())).isEqualTo(new InventoryState(1, 1, 0, 0));
+        assertThat(redisTemplate.opsForHash().get(metaKey(fixture.sessionId()), "stock")).isEqualTo("0");
+        assertThat(redisTemplate.opsForHash().get(
+                admissionsKey(fixture.sessionId()), Long.toString(user.userId())))
+                .isEqualTo("A:" + orderId);
+    }
+
+    @Test
+    void timeoutLifecycleFailureForOneClosedOrderDoesNotBlockLaterRedisSync() throws Exception {
+        Fixture first = fixture("timeout-isolation-first", 1, Window.OPEN);
+        Identity firstUser = identity("timeout-isolation-first", UserRole.USER);
+        prepareRedis(first, 1, Window.OPEN);
+        long firstOrder = reserve(first, firstUser);
+        redisTemplate.opsForHash().put(metaKey(first.sessionId()), "state", "BROKEN");
+
+        Fixture second = fixture("timeout-isolation-second", 1, Window.OPEN);
+        Identity secondUser = identity("timeout-isolation-second", UserRole.USER);
+        prepareRedis(second, 1, Window.OPEN);
+        long secondOrder = reserve(second, secondUser);
+        LocalDateTime expired = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1);
+        jdbcTemplate.update("UPDATE ticket_order SET expire_at = ? WHERE id IN (?, ?)",
+                expired, firstOrder, secondOrder);
+
+        new OrderTimeoutScheduler(orderTimeoutApi, flashOrderLifecycleApplicationService, 100)
+                .processExpiredOrders();
+
+        assertThat(orderStatus(firstOrder)).isEqualTo("CLOSED");
+        assertThat(orderStatus(secondOrder)).isEqualTo("CLOSED");
+        assertThat(inventory(first.sessionId())).isEqualTo(new InventoryState(1, 1, 0, 0));
+        assertThat(inventory(second.sessionId())).isEqualTo(new InventoryState(1, 1, 0, 0));
+        assertThat(redisTemplate.opsForHash().get(metaKey(first.sessionId()), "stock")).isEqualTo("0");
+        assertThat(redisTemplate.opsForHash().get(
+                admissionsKey(first.sessionId()), Long.toString(firstUser.userId())))
+                .isEqualTo("A:" + firstOrder);
+        assertThat(redisTemplate.opsForHash().get(metaKey(second.sessionId()), "stock")).isEqualTo("1");
+        assertThat(redisTemplate.opsForHash().hasKey(
+                admissionsKey(second.sessionId()), Long.toString(secondUser.userId()))).isFalse();
+    }
+
     private void assertFlashFailure(
             Fixture fixture, Identity identity, int expectedStatus, String expectedCode) throws Exception {
         mockMvc.perform(post(path(fixture))
@@ -234,6 +445,30 @@ class FlashReservationIntegrationTest {
                 .andExpect(status().is(expectedStatus))
                 .andExpect(jsonPath("$.code").value(expectedCode));
         assertThat(orderCount(fixture.sessionId())).isZero();
+    }
+
+    private long reserve(Fixture fixture, Identity identity) throws Exception {
+        return responseJson(mockMvc.perform(post(path(fixture))
+                        .header(HttpHeaders.AUTHORIZATION, identity.token()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("WAIT_PAY"))
+                .andReturn()).get("id").asLong();
+    }
+
+    private void forcePending(Fixture fixture, Identity identity, String admissionId) {
+        redisTemplate.opsForHash().put(
+                admissionsKey(fixture.sessionId()),
+                Long.toString(identity.userId()),
+                "P:" + admissionId);
+    }
+
+    private void assertPendingUnchanged(
+            Fixture fixture, Identity identity, String admissionId, String expectedStock) {
+        assertThat(redisTemplate.opsForHash().get(metaKey(fixture.sessionId()), "stock"))
+                .isEqualTo(expectedStock);
+        assertThat(redisTemplate.opsForHash().get(
+                admissionsKey(fixture.sessionId()), Long.toString(identity.userId())))
+                .isEqualTo("P:" + admissionId);
     }
 
     private void assertStableSuccess(
@@ -357,6 +592,16 @@ class FlashReservationIntegrationTest {
                         resultSet.getInt("locked_stock"),
                         resultSet.getInt("sold_stock")),
                 sessionId);
+    }
+
+    private String orderStatus(long orderId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT status FROM ticket_order WHERE id = ?", String.class, orderId);
+    }
+
+    private String ticketStatus(long orderId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT status FROM ticket WHERE order_id = ?", String.class, orderId);
     }
 
     private void assertInventoryInvariant(long sessionId) {

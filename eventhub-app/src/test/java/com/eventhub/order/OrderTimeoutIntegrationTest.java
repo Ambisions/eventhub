@@ -83,6 +83,13 @@ class OrderTimeoutIntegrationTest {
 
         assertThat(first.scanned()).isEqualTo(2);
         assertThat(first.closed()).isEqualTo(2);
+        assertThat(first.closedOrders())
+                .extracting("orderId", "userId", "sessionId")
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple(
+                                past.orderId(), past.userId(), past.sessionId()),
+                        org.assertj.core.groups.Tuple.tuple(
+                                exact.orderId(), exact.userId(), exact.sessionId()));
         assertThat(orderStatus(past.orderId())).isEqualTo("CLOSED");
         assertThat(inventory(past.sessionId())).isEqualTo(new InventoryState(2, 2, 0, 0));
         assertThat(orderStatus(exact.orderId())).isEqualTo("CLOSED");
@@ -94,7 +101,8 @@ class OrderTimeoutIntegrationTest {
 
         assertThat(repeated.scanned()).isZero();
         assertThat(repeated.closed()).isZero();
-        assertThat(orderTimeoutProcessor.closeExpiredOrder(future.orderId(), SCAN_NOW)).isFalse();
+        assertThat(repeated.closedOrders()).isEmpty();
+        assertThat(orderTimeoutProcessor.closeExpiredOrder(future.orderId(), SCAN_NOW)).isEmpty();
         assertThat(inventory(past.sessionId())).isEqualTo(new InventoryState(2, 2, 0, 0));
         assertInventoryInvariant(past.sessionId());
         assertInventoryInvariant(exact.sessionId());
@@ -175,9 +183,9 @@ class OrderTimeoutIntegrationTest {
                 "timeout-race", new InventoryState(2, 1, 1, 0), SCAN_NOW.minusMinutes(1));
 
         List<Outcome> outcomes = runConcurrently(
-                () -> orderTimeoutProcessor.closeExpiredOrder(fixture.orderId(), SCAN_NOW)
+                () -> orderTimeoutProcessor.closeExpiredOrder(fixture.orderId(), SCAN_NOW).isPresent()
                         ? Outcome.TIMEOUT_WON : Outcome.TIMEOUT_NOOP,
-                () -> orderTimeoutProcessor.closeExpiredOrder(fixture.orderId(), SCAN_NOW)
+                () -> orderTimeoutProcessor.closeExpiredOrder(fixture.orderId(), SCAN_NOW).isPresent()
                         ? Outcome.TIMEOUT_WON : Outcome.TIMEOUT_NOOP);
 
         assertThat(outcomes).filteredOn(Outcome.TIMEOUT_WON::equals).hasSize(1);
@@ -204,7 +212,7 @@ class OrderTimeoutIntegrationTest {
                         throw exception;
                     }
                 },
-                () -> orderTimeoutProcessor.closeExpiredOrder(fixture.orderId(), SCAN_NOW)
+                () -> orderTimeoutProcessor.closeExpiredOrder(fixture.orderId(), SCAN_NOW).isPresent()
                         ? Outcome.TIMEOUT_WON : Outcome.TIMEOUT_NOOP);
 
         String status = orderStatus(fixture.orderId());
@@ -235,7 +243,7 @@ class OrderTimeoutIntegrationTest {
                         throw exception;
                     }
                 }),
-                () -> orderTimeoutProcessor.closeExpiredOrder(fixture.orderId(), SCAN_NOW)
+                () -> orderTimeoutProcessor.closeExpiredOrder(fixture.orderId(), SCAN_NOW).isPresent()
                         ? Outcome.TIMEOUT_WON : Outcome.TIMEOUT_NOOP);
 
         String status = orderStatus(fixture.orderId());

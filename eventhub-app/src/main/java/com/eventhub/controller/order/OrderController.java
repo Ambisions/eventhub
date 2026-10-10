@@ -1,5 +1,6 @@
 package com.eventhub.controller.order;
 
+import com.eventhub.application.flash.FlashOrderLifecycleApplicationService;
 import com.eventhub.controller.order.dto.OrderResponse;
 import com.eventhub.controller.order.dto.RefundResponse;
 import com.eventhub.order.api.OrderCommandApi;
@@ -19,10 +20,15 @@ public final class OrderController {
 
     private final OrderQueryApi orderQueryApi;
     private final OrderCommandApi orderCommandApi;
+    private final FlashOrderLifecycleApplicationService flashOrderLifecycleApplicationService;
 
-    public OrderController(OrderQueryApi orderQueryApi, OrderCommandApi orderCommandApi) {
+    public OrderController(
+            OrderQueryApi orderQueryApi,
+            OrderCommandApi orderCommandApi,
+            FlashOrderLifecycleApplicationService flashOrderLifecycleApplicationService) {
         this.orderQueryApi = orderQueryApi;
         this.orderCommandApi = orderCommandApi;
+        this.flashOrderLifecycleApplicationService = flashOrderLifecycleApplicationService;
     }
 
     @GetMapping("/{orderId}")
@@ -43,13 +49,13 @@ public final class OrderController {
     public OrderResponse cancel(
             @AuthenticationPrincipal EventHubAuthenticatedUser currentUser,
             @PathVariable long orderId) {
-        return OrderResponse.from(orderCommandApi.cancel(currentUser.userId(), orderId));
+        return OrderResponse.from(flashOrderLifecycleApplicationService.cancel(currentUser.userId(), orderId));
     }
 
     @PostMapping("/{orderId}/refund")
     public RefundResponse refund(
             @AuthenticationPrincipal EventHubAuthenticatedUser currentUser,
             @PathVariable long orderId) {
-        return RefundResponse.from(orderCommandApi.refund(currentUser.userId(), orderId));
+        return RefundResponse.from(flashOrderLifecycleApplicationService.refund(currentUser.userId(), orderId));
     }
 }

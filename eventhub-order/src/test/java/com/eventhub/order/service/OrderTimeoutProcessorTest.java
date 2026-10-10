@@ -11,7 +11,7 @@ import com.eventhub.order.repository.OrderEntity;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,7 +31,7 @@ class OrderTimeoutProcessorTest {
     void returnsFalseWhenOrderIsMissing() {
         TestContext context = context();
 
-        assertFalse(context.processor().closeExpiredOrder(91L, SCAN_NOW));
+        assertTrue(context.processor().closeExpiredOrder(91L, SCAN_NOW).isEmpty());
 
         verify(context.orderMapper(), never()).closeIfWaitPayAndExpired(91L, SCAN_NOW);
         verify(context.inventoryReservationApi(), never()).releaseOne(anyLong());
@@ -52,7 +52,7 @@ class OrderTimeoutProcessorTest {
             when(context.orderMapper().selectOrderById(orderId)).thenReturn(order);
             when(context.orderMapper().closeIfWaitPayAndExpired(orderId, SCAN_NOW)).thenReturn(0);
 
-            assertFalse(context.processor().closeExpiredOrder(orderId, SCAN_NOW));
+            assertTrue(context.processor().closeExpiredOrder(orderId, SCAN_NOW).isEmpty());
             orderId++;
         }
 
@@ -69,7 +69,12 @@ class OrderTimeoutProcessorTest {
                 .thenReturn(order(91L, 501L, OrderStatus.WAIT_PAY));
         when(context.orderMapper().closeIfWaitPayAndExpired(91L, SCAN_NOW)).thenReturn(1);
 
-        assertTrue(context.processor().closeExpiredOrder(91L, SCAN_NOW));
+        var result = context.processor().closeExpiredOrder(91L, SCAN_NOW);
+
+        assertTrue(result.isPresent());
+        assertEquals(91L, result.orElseThrow().orderId());
+        assertEquals(701L, result.orElseThrow().userId());
+        assertEquals(501L, result.orElseThrow().sessionId());
 
         InOrder order = inOrder(context.orderMapper(), context.inventoryReservationApi());
         order.verify(context.orderMapper()).selectOrderById(91L);
@@ -105,6 +110,7 @@ class OrderTimeoutProcessorTest {
     private static OrderEntity order(long orderId, long sessionId, OrderStatus status) {
         OrderEntity order = new OrderEntity();
         order.setId(orderId);
+        order.setUserId(701L);
         order.setSessionId(sessionId);
         order.setStatus(status);
         return order;
