@@ -18,11 +18,11 @@
 - Session 库存
 - 库存初始化、锁定、释放和 Refund `sold → available` mutation
 
-Phase 10 Batch 3 的 FLASH Redis admission primitives、ADMIN Preparation、Lua
-原子 mutation、Redis-derived admission state 与新请求 Fail Fast / Fail Closed
-已经 `COMPLETE / VERIFIED / FROZEN`。Batch 4 的 Redis admission → synchronous
-MySQL Reservation 编排与 Batch 5 的 Order lifecycle Redis synchronization 仍为
-`NOT STARTED / NOT_IMPLEMENTED`。Fixed Window Rate Limit 与 WaitingList 为
+Phase 10 Batch 3–5 的 FLASH Redis admission primitives、ADMIN Preparation、Lua
+原子 mutation、Redis admission → synchronous MySQL Reservation 编排、Order
+lifecycle Redis synchronization 与新请求 Fail Fast / Fail Closed 已经
+`COMPLETE / VERIFIED / FROZEN`。Inventory 拥有四个 Lua primitive API，App 拥有
+跨系统编排，Order 继续拥有权威 MySQL transaction。Fixed Window Rate Limit 与 WaitingList 为
 `FUTURE / PLANNED / NOT_IMPLEMENTED` 的流量治理能力，不是 Phase 10
 correctness requirement。RabbitMQ async order、Retry / DLQ 与 automatic
 reconciliation 同样仍为 Future。未来异步 Reservation 精确持久化模型、
@@ -138,10 +138,10 @@ MySQL 条件 UPDATE 负责 NORMAL 模式下的原子库存竞争控制。
 
 # 5. FLASH 抢票规则
 
-本节描述 Phase 10 Batch 3 已 `COMPLETE / VERIFIED / FROZEN` 的当前 Production
-FLASH Redis admission primitives。Batch 4 的跨系统 FLASH Reservation 编排与
-Batch 5 的 Order lifecycle Redis synchronization 尚未实现；未来异步 Reservation
-的精确持久化模型、字段与 `reservation_id` 尚未冻结。
+本节描述 Phase 10 Batch 3–5 已 `COMPLETE / VERIFIED / FROZEN` 的当前 Production
+FLASH 链路。当前四个 Lua 为 `flash_prepare.lua`、`flash_reserve.lua`、
+`flash_reservation_settle.lua` 与 `flash_order_lifecycle.lua`，没有第五个当前业务
+Lua。未来异步 Reservation 的精确持久化模型、字段与 `reservation_id` 尚未冻结。
 
 当前 reserve result contract 区分：`P:<sameAdmissionId>` →
 `IDEMPOTENT_PENDING`，`P:<differentAdmissionId>` → `ALREADY_PENDING`，
@@ -165,8 +165,10 @@ Redis Command
 
 Phase 10 FLASH admission 原子过程只负责 admission stock、售票条件、重复准入
 和 Redis-derived admission state 的一致变化；MySQL Inventory 继续是权威库存
-事实。未来引入 persistent Reservation / purchased 等模型时，再按届时冻结的
-Contract 扩展状态边界。
+事实。当前 admission value 仅为 `P:<admissionId>`、`A:<orderId>`、
+`R:<orderId>`：Cancel / Timeout 释放匹配的 `A`，Refund 将匹配的 `A` 转换为
+`R`，Pay 不修改 Redis。数据库提交后的 Redis lifecycle failure 不反转 MySQL
+结果。未来引入 persistent Reservation 等模型时，再按届时冻结的 Contract 扩展状态边界。
 
 未来完整流程可能需要保持以下状态的一致变化：
 

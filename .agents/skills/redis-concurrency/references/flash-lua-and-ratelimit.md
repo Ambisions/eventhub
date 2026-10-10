@@ -30,27 +30,33 @@ Redis Lua
 
 ---
 
-# 2. 一次 FLASH 请求的原子边界
+# 2. Phase 10 当前 Redis 状态与原子边界
 
-典型 Lua 判断包括：
+当前只冻结两个 same-slot Key：
 
-- Sales Time
-- purchased
-- Existing Reservation
-- Stock
+- `eventhub:flash:{sessionId}:meta`
+- `eventhub:flash:{sessionId}:admissions`
 
-成功以后根据当前实现完成必要：
+`meta` Hash 字段为：
 
-- stock - 1
-- occupied
-- reservation-map
-- Reservation Temporary State
+- `state = PREPARED`
+- `capacity`
+- `stock`
+- `saleStartUs`
+- `saleEndUs`
 
-如果这些状态共同决定：
+`admissions` Hash 以 `userId` 为 field，value 只允许：
 
-“用户是否成功获得当前抢票处理资格”
+- `P:<admissionId>`
+- `A:<orderId>`
+- `R:<orderId>`
 
-则必须位于同一个合理原子边界。
+当前稳定不变量是：
+
+`stock + count(P) + count(A) = capacity`
+
+`R` 不占用 admission stock，但继续阻止同一用户再次 admission。售票窗口、重复
+准入、stock 与 P/A/R mutation 必须位于对应 Lua 原子边界。
 
 不要：
 
@@ -90,16 +96,16 @@ Lua 应保持：
 
 Lua 返回结果需要让 Java 明确认出业务结果。
 
-例如：
+当前精确协议为：
 
-- SUCCESS
-- SOLD_OUT
-- ALREADY_PURCHASED
-- ALREADY_PROCESSING
-- NOT_STARTED
-- ENDED
-
-具体编码按当前实现确定。
+- Prepare：`PREPARED`、`IDEMPOTENT_PREPARED`、`WINDOW_CLOSED`、`STATE_CONFLICT`
+- Admission：`ADMITTED`、`IDEMPOTENT_PENDING`、`ALREADY_PENDING`、
+  `ALREADY_ADMITTED`、`SOLD_OUT`、`NOT_STARTED`、`ENDED`、`NOT_PREPARED`、
+  `STATE_CONFLICT`
+- Settle：`ACTIVATED`、`IDEMPOTENT_ACTIVATED`、`RELEASED`、
+  `IDEMPOTENT_RELEASED`、`FENCE_CONFLICT`、`NOT_PREPARED`、`STATE_CONFLICT`
+- Lifecycle：`RELEASED`、`IDEMPOTENT_RELEASED`、`REFUNDED`、
+  `IDEMPOTENT_REFUNDED`、`FENCE_CONFLICT`、`NOT_PREPARED`、`STATE_CONFLICT`
 
 不要只返回：
 
@@ -121,11 +127,14 @@ Return Protocol 变化必须同步：
 
 `eventhub-inventory/src/main/resources/lua/`
 
-例如：
+Phase 10 当前精确为四个脚本：
 
-`flash-reserve.lua`
+- `flash_prepare.lua`
+- `flash_reserve.lua`
+- `flash_reservation_settle.lua`
+- `flash_order_lifecycle.lua`
 
-`rate-limit.lua`
+当前没有第五个业务 Lua；`rate-limit.lua` 仍是 Future Proposal。
 
 禁止大型 Java Inline Script。
 
@@ -202,14 +211,12 @@ V1 不把 Redisson Distributed Lock 作为核心并发方案。
 
 # 9. FLASH Lua 验证
 
-至少根据当前脚本覆盖：
+至少根据当前四个脚本覆盖：
 
-- SUCCESS
-- SOLD_OUT
-- ALREADY_PURCHASED
-- ALREADY_PROCESSING
-- NOT_STARTED
-- ENDED
+- Prepare 首次成功、等价幂等、窗口关闭、状态冲突
+- Admission 成功、同 admission ID 幂等、不同 pending、已有 A/R、售罄、窗口边界
+- Settle `P → A`、匹配 P release、幂等与 fencing
+- Lifecycle 匹配 A release、`A → R`、重复 refund、P/mismatch fencing
 
 并验证：
 
@@ -217,7 +224,9 @@ V1 不把 Redisson Distributed Lock 作为核心并发方案。
 - Failure 不错误扣库存
 - Duplicate Request 不重复扣库存
 - stock >= 0
-- occupied / reservation-map 与结果一致
+- `stock + count(P) + count(A) = capacity`
+- P/A/R 与 expected admission/order identity 一致
 - 高并发执行保持正确
+- MySQL commit 后 Redis lifecycle failure 不反转数据库结果
 
 核心 Lua 必须在真实 Redis 上执行验证。

@@ -186,61 +186,52 @@ Duplicate Refund：
 
 # 7. FLASH
 
-本节为 `FUTURE / FROZEN / NOT_IMPLEMENTED` 的核心方向验证清单。
+本节为 Phase 10 `CURRENT / IMPLEMENTED / VERIFIED / FROZEN` 的同步 FLASH
+Reservation 验证清单。
 
 FLASH 验证不能只停在 Lua。
 
-根据开发阶段分别证明：
+至少证明：
 
-Redis Lua
-→ 原子入口
-
-Reservation
-→ 请求身份
-
-RabbitMQ
-→ 异步处理
-
-Order Consumer
-→ Duplicate 安全
-
-Compensation
-→ Failure Recovery
-
-最终：
-
-Redis 临时执行状态
-
-能够与：
-
-MySQL 最终事实
-
-收敛。
+- ADMIN Preparation 从权威 MySQL Session/Inventory 建立 Redis `meta`；不合格或
+  dirty state 不留下部分 Redis 状态
+- 只有 Redis `ADMITTED` 才进入 `ReservationApi.reserveFlash(...)`
+- 成功路径为 `P:<admissionId> → WAIT_PAY commit → A:<orderId>`
+- 确定性 MySQL/Domain rejection 会匹配释放 P；补偿失败不伪装成功
+- ambiguous database outcome 保留 P 且不恢复 stock；不得把模拟 evidence 扩张为
+  真实网络 protocol-level ambiguity proof
+- activation failure 不反转已提交的 WAIT_PAY / Inventory locked 事实
+- Cancel / Timeout 在数据库提交后释放匹配 A；Refund 把匹配 A 转为 R；Pay 不修改 Redis
+- lifecycle Redis failure 不反转已提交 MySQL，重复调用保持幂等与 fencing
+- NORMAL Reservation 在 Redis unavailable 时保持独立
 
 ---
 
 # 8. FLASH Lua
 
-至少根据当前脚本覆盖：
+至少根据当前四个脚本覆盖：
 
-- SUCCESS
-- SOLD_OUT
-- ALREADY_PURCHASED
-- ALREADY_PROCESSING
-- NOT_STARTED
-- ENDED
+- Prepare：`PREPARED` / `IDEMPOTENT_PREPARED` / `WINDOW_CLOSED` / `STATE_CONFLICT`
+- Admission：`ADMITTED`、pending 幂等/冲突、已有 A/R、`SOLD_OUT`、窗口边界与未准备
+- Settle：`P → A`、匹配 P release、幂等与 fencing
+- Lifecycle：匹配 A release、`A → R`、重复 Refund、P/mismatch fencing
 
 并检查：
 
 - Failure 不错误扣库存
 - Duplicate 不重复扣库存
 - stock >= 0
-- occupied 正确
-- reservation-map 正确
+- `stock + count(P) + count(A) = capacity`
+- P/A/R identity 与 Redis stock mutation 一致
+- real Redis concurrency 不产生负 stock 或重复 admission
+- post-commit Redis failure 不反转 MySQL final fact
 
 ---
 
 # 9. RabbitMQ Order Create
+
+本节为 `FUTURE / FROZEN / NOT_IMPLEMENTED`；Phase 10 当前同步 FLASH 不创建
+RabbitMQ business topology。
 
 主动重复发送相同业务请求。精确业务 Key / `reservation_id` 尚未冻结。
 
@@ -287,6 +278,9 @@ Schema、ZSet、资格时长或唯一约束列为硬性断言。
 ---
 
 # 12. Rate Limit
+
+Fixed Window Rate Limit 为 `FUTURE / PLANNED / NOT_IMPLEMENTED`，不是 Phase 10
+correctness requirement。仅在后续实现后执行以下验证：
 
 验证：
 

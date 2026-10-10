@@ -846,7 +846,7 @@ SELECT FOR UPDATE
 
 # 12. FLASH 高并发抢票流程
 
-Phase 10 当前链路为 `CURRENT PHASE / FROZEN DESIGN / NOT_IMPLEMENTED`：
+Phase 10 当前链路为 `CURRENT / IMPLEMENTED / VERIFIED / FROZEN`：
 
 ```text
 User
@@ -864,6 +864,12 @@ synchronous MySQL Reservation
 WAIT_PAY
 
 ```
+
+`eventhub-app` 负责 HTTP/JWT、Redis admission、同步 Reservation 调用与提交后的
+Redis lifecycle synchronization；`eventhub-order` 继续拥有权威 MySQL 本地事务。
+只有 Redis 返回 `ADMITTED` 才进入 MySQL。确定性的 MySQL/Domain rejection 会释放
+匹配的 `P:<admissionId>`；模拟的 ambiguous database outcome 保留 `P` 且不恢复
+Redis stock。MySQL 已提交 `WAIT_PAY` 后 Redis activation 失败不反转数据库成功。
 
 当前模块 Public API ownership 固定为：
 
@@ -888,7 +894,7 @@ Session load
 ```
 
 Phase 10 对已经成功创建的 FLASH `WAIT_PAY` Order 冻结以下 lifecycle
-同步矩阵；该矩阵当前为 `FROZEN DESIGN / NOT_IMPLEMENTED`：
+同步矩阵；该矩阵当前为 `CURRENT / IMPLEMENTED / VERIFIED / FROZEN`：
 
 ```text
 Pay:
@@ -914,6 +920,9 @@ MySQL PAID → REFUNDED
 `RELEASE` 仅允许把 `A:<expectedOrderId>` 删除并将 admission stock 恢复 `+1`；
 `REFUND` 仅允许把 `A:<expectedOrderId>` 转换为 `R:<expectedOrderId>` 并将
 admission stock 恢复 `+1`。两者都必须保留 expected-order fencing 与幂等语义。
+当前 admission value 精确为 `P:<admissionId>`、`A:<orderId>` 或
+`R:<orderId>`：Cancel / Timeout 释放匹配的 `A`，Refund 将匹配的 `A` 转换为
+`R`；`R` 不占用 admission stock，但继续阻止同一用户再次 admission。
 MySQL 始终是最终事实，Redis 只是 derived state；已提交 lifecycle operation 后的
 Redis failure 不得反转已提交的 MySQL 结果。Phase 10 不实现 automatic retry、
 MQ retry、DLQ 或 automatic reconciliation。

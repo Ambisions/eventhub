@@ -453,9 +453,11 @@ CANCELLED + locked → available + 重复调用
 当前退款：
 REFUNDED + sold → available + 历史购买资格不恢复
 
-Phase 10 当前 FLASH（`FROZEN DESIGN / NOT_IMPLEMENTED`）：
+Phase 10 当前 FLASH（`CURRENT / IMPLEMENTED / VERIFIED / FROZEN`）：
 Redis Lua Admission + `ReservationApi.reserveFlash(...)` + 同步 MySQL `WAIT_PAY`
-以及 Redis/MySQL 失败协调与 lifecycle sync
+以及 Redis/MySQL 失败协调与 lifecycle sync。App 拥有 ADMIN Preparation、Redis
+admission 与 Cancel / Timeout / Refund 的 post-commit synchronization；MySQL 始终
+是最终事实，lifecycle Redis failure 不反转已提交数据库结果。
 
 未来 FLASH 可靠性演进：
 Outbox + MQ + Consumer + 重复消息 + 失败恢复

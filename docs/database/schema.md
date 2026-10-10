@@ -1,11 +1,11 @@
 # EventHub V1 Baseline Schema
 
-Status: `V1 / V2 / V3 FROZEN / IMPLEMENTED / RUNTIME VERIFIED`
+Status: `V1 / V2 / V3 / V4 FROZEN / IMPLEMENTED / RUNTIME VERIFIED`
 
-This document explains the frozen schema design. The verified Flyway V1, V2, and V3
-migrations are the executable source of truth for the current database. The Phase 5
-V2 and Phase 9 V3 sections below record the implemented and runtime-verified schema
-evolution.
+This document explains the frozen schema design. The verified Flyway V1, V2, V3,
+and V4 migrations are the executable source of truth for the current database. The
+Phase 5 V2, Phase 9 V3, and Phase 10 V4 sections below record the implemented and
+runtime-verified schema evolution.
 
 ## Scope
 
@@ -121,6 +121,21 @@ successful migrations with no failure and reported the schema up to date on the
 second run. Metadata and behavior probes verified both expanded status checks and
 the generated purchase-guard behavior.
 
+## Phase 10 V4 Verified Schema
+
+V4 adds exactly one column and one named check to `event_sessions`:
+
+| Column | Type | Nullable | Default | Collation | Constraint | Index |
+| --- | --- | --- | --- | --- | --- | --- |
+| `sale_mode` | `VARCHAR(16)` | No | `NORMAL` | `utf8mb4_0900_as_cs` | `ck_event_sessions_sale_mode`: `sale_mode IN ('NORMAL', 'FLASH')` | None |
+
+The default safely upgrades existing Session rows to `NORMAL`. V4 adds no table,
+index, foreign key, trigger, or other business column. Fresh MySQL 8.4.11 evidence
+applied V1 through V4 with four successful history rows, zero failed migrations,
+current version 4, and a second-run schema-up-to-date result. Real constraint behavior
+proved the default, both uppercase values, case-sensitive rejection of lowercase and
+other invalid values, and zero synthetic residue.
+
 ### Existing Username Compatibility
 
 The V1 `username` definition is `VARCHAR(64) NOT NULL` plus
@@ -185,6 +200,7 @@ existing state vocabulary.
 | `event_id` | `BIGINT` | No | None | Logical reference to `events.id` | Owning event. |
 | `name` | `VARCHAR(200)` | No | None | None | Session name. |
 | `venue` | `VARCHAR(255)` | Yes | `NULL` | None | Optional venue. |
+| `sale_mode` | `VARCHAR(16)` | No | `NORMAL` | Check: `NORMAL`, `FLASH` | Reservation entry mode added by V4. |
 | `sale_start_at` | `DATETIME(6)` | No | None | None | Ticket sale opening time. |
 | `sale_end_at` | `DATETIME(6)` | No | None | Check: `sale_start_at < sale_end_at` | Ticket sale closing time. |
 | `start_at` | `DATETIME(6)` | No | None | None | Session start time. |
@@ -266,7 +282,7 @@ decision.
 | All six tables | Primary key on `id` | Stable internal identity using the frozen V1 key strategy. |
 | `users` | Unique `username` | One account per login identifier. |
 | `events` | Status check | Restricts persisted event workflow values. |
-| `event_sessions` | Sale and runtime window checks | Rejects reversed time ranges. |
+| `event_sessions` | Sale-mode and time-window checks | Restricts mode to `NORMAL` / `FLASH` and rejects reversed time ranges. |
 | `event_inventory` | Unique `session_id` | One inventory bucket per session. |
 | `event_inventory` | Four nonnegative checks | Prevents invalid negative stock. |
 | `event_inventory` | Total-equals-components check | Enforces the inventory conservation invariant. |
@@ -301,7 +317,10 @@ must use expected-state conditional updates and verify affected rows.
 ## Deferred Design
 
 - WaitingList persistence: `FUTURE / PLANNED`; exact table name, Schema, constraints and qualification lifecycle are not yet frozen.
-- FLASH Reservation: the business concept and core Redis/Lua/Outbox/RabbitMQ direction are Future Frozen, while exact storage, columns and idempotency key are not yet frozen.
+- Current synchronous FLASH Reservation uses the existing six tables plus V4
+  `event_sessions.sale_mode`; it does not add a persistent Reservation table. Future
+  asynchronous Reservation, Outbox, RabbitMQ, and exact persistence/idempotency
+  contracts remain deferred.
 - Outbox persistence: Transactional Outbox direction is Future Frozen; exact table name, Schema and state machine are not yet frozen.
 - Consumer idempotency storage: introduced with at-least-once message consumption.
 - Notification records: introduced only if notifications require persistent delivery state.
@@ -325,3 +344,6 @@ must use expected-state conditional updates and verify affected rows.
 - V3 changes only the Order/Ticket status checks and generated `purchase_guard`
   expression described above; it adds no table, business column, index, foreign key,
   or trigger.
+- V4 exact schema state: `FROZEN / IMPLEMENTED / RUNTIME VERIFIED`.
+- V4 adds only `event_sessions.sale_mode` and `ck_event_sessions_sale_mode`; it adds
+  no table, index, foreign key, trigger, or other business column.

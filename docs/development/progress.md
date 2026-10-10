@@ -712,7 +712,7 @@ Status: `COMPLETE / VERIFIED / FROZEN`
 
 ## Phase 10 — FLASH Reservation Foundation
 
-Status: `IN PROGRESS`
+Status: `COMPLETE / VERIFIED / FROZEN`
 
 Design: `COMPLETE / FROZEN`
 
@@ -726,7 +726,7 @@ Status: `COMPLETE / VERIFIED / FROZEN`
 
 ### Batch 2 — Sale Mode Foundation
 
-Status: `COMPLETE / VERIFIED`
+Status: `COMPLETE / VERIFIED / FROZEN`
 
 - Trusted baseline: `d7b30784353f22c8f80ae12a800dfd4c37120bb4`.
 - Flyway V4 is verified. `SessionSaleMode` contains only `NORMAL` and `FLASH`;
@@ -756,7 +756,7 @@ Status: `COMPLETE / VERIFIED`
 
 ### Batch 3 — Redis Admission + Preparation
 
-Status: `COMPLETE / VERIFIED`
+Status: `COMPLETE / VERIFIED / FROZEN`
 
 - `eventhub-inventory` owns the Redis admission primitives and exact hash-tagged
   FLASH keys; `eventhub-app` owns explicit ADMIN-only Preparation orchestration.
@@ -781,7 +781,7 @@ Status: `COMPLETE / VERIFIED`
 
 ### Batch 4 — FLASH Reservation Integration
 
-Status: `COMPLETE / VERIFIED`
+Status: `COMPLETE / VERIFIED / FROZEN`
 
 - `eventhub-app` now owns the cross-system FLASH Reservation orchestration:
   `Redis admission -> synchronous MySQL reservation -> Redis settle`, while
@@ -807,7 +807,7 @@ Status: `COMPLETE / VERIFIED`
 
 ### Batch 5 — Order Lifecycle Redis Synchronization
 
-Status: `COMPLETE / VERIFIED`
+Status: `COMPLETE / VERIFIED / FROZEN`
 
 - MySQL remains the authoritative lifecycle ledger. After a successful database commit,
   `eventhub-app` performs best-effort FLASH Redis synchronization through the
@@ -831,6 +831,25 @@ Status: `COMPLETE / VERIFIED`
   reconciliation, Rate Limit, WaitingList, POM/Security change, or V5 migration was
   introduced.
 
-### Batch 6
+### Batch 6 — Final Verification / Docs / Freeze
 
-Status: `NOT STARTED`
+Status: `COMPLETE / VERIFIED / FROZEN`
+
+- Fresh isolated Compose project `eventhub-phase10-batch6-20261010a` started MySQL
+  8.4.11, Redis 8.2.9, and RabbitMQ 4.3.5-management from new named volumes; the
+  pre-migration business-table count was zero.
+- Flyway applied V1 through V4 with four successful history rows, zero failed
+  migrations, current version 4, and a second-run schema-up-to-date result.
+- Fresh verification passed 6 schema behavior tests, 27 Phase 10 targeted tests,
+  and 70 Phase 6–9 preservation tests, all with zero failures, errors, or skips.
+- The final Root + 9 Module `clean verify` passed 64 suites / 321 tests with zero
+  failures, errors, or skips; Spring Boot repackage succeeded.
+- Final MySQL business-table residue, invalid inventory/order/ticket states, Redis
+  FLASH/smoke keys, RabbitMQ EventHub topology, and application AMQP connections
+  were all zero.
+- Formal Reviewer reported `Blocker: 0`, `Major: 0`, `Minor: 0`, and
+  `Needs Verification: 0`. The Phase-level Test Reviewer reported `PROVEN: 20`,
+  `PARTIALLY_PROVEN: 0`, `NOT_PROVEN: 0`, and `Blocking Gap: NO`.
+- Phase 10 intentionally leaves RabbitMQ asynchronous ordering, Transactional
+  Outbox, Retry/DLQ, automatic reconciliation and Redis crash recovery, Rate Limit,
+  and WaitingList as future work.

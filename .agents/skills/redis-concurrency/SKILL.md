@@ -12,10 +12,11 @@ description: >
 
 本 Skill 定义 EventHub Redis 相关任务的标准执行流程。
 
-EventHub Phase 10 Batch 3 的 Redis Lua Admission primitives 与 ADMIN Preparation
-已经 `COMPLETE / VERIFIED / FROZEN`。Batch 4 的 Redis admission → synchronous
-MySQL Reservation 编排与 Batch 5 的 Order lifecycle Redis synchronization 仍为
-`NOT STARTED / NOT_IMPLEMENTED`。RabbitMQ async order、Retry / DLQ 与 automatic
+EventHub Phase 10 Batch 3–5 的 Redis Lua Admission primitives、ADMIN Preparation、
+Redis admission → synchronous MySQL Reservation 编排与 Order lifecycle Redis
+synchronization 已经 `COMPLETE / VERIFIED / FROZEN`。当前同步链路使用
+`P:<admissionId>`、`A:<orderId>`、`R:<orderId>`，MySQL 始终是最终事实。
+RabbitMQ async order、Retry / DLQ 与 automatic
 reconciliation 仍为 Future；未来异步 Reservation 的精确持久化模型、字段与
 `reservation_id` 尚未冻结。WaitingList capability 为 `FUTURE / PLANNED`，具体
 Schema、ZSet、资格时长和约束尚未冻结。Fixed Window Rate Limit 同样属于 future
@@ -27,7 +28,7 @@ traffic hardening，不是 Phase 10 correctness requirement 或 completion crite
 - Key / TTL
 - FLASH Stock
 - Lua
-- occupied / purchased
+- Phase 10 admission `P` / `A` / `R`
 - Reservation Redis State（future design only）
 - WaitingList（future planned）
 - Rate Limit
@@ -77,9 +78,10 @@ MySQL 最终事实
 
 例如：
 
-- Session Stock
-- occupied-users
-- purchased-users
+- Session admission stock
+- `P:<admissionId>` pending admission
+- `A:<orderId>` active admission
+- `R:<orderId>` refunded historical admission
 - Rate Limit
 
 ## Temporary Business State
@@ -166,9 +168,8 @@ Redis 与 MySQL 可以存在短暂差异，
 
 涉及：
 
-- occupied-users
-- purchased-users
-- reservation-map
+- Phase 10 `P` / `A` / `R` admission state
+- future persistent Reservation model
 - PROCESSING / SUCCESS / FAILED（example; persistence model not yet frozen）
 - WaitingList implementation（not yet frozen）
 - Qualification
@@ -206,15 +207,11 @@ Redis Key 不允许散落在业务代码中手工拼接。
 
 统一通过 Key Builder / Constants 生成。
 
-例如：
+当前 Phase 10 通过 module-local `FlashRedisKeys` 统一生成：
 
-`RedisKeys.sessionStock(sessionId)`
+`FlashRedisKeys.meta(sessionId)`
 
-`RedisKeys.occupiedUsers(sessionId)`
-
-`RedisKeys.purchasedUsers(sessionId)`
-
-`RedisKeys.reservationMap(sessionId)`
+`FlashRedisKeys.admissions(sessionId)`
 
 Java、Lua、测试和补偿逻辑必须共享相同 Key 语义。
 
@@ -289,29 +286,30 @@ Lua 只负责：
 
 ---
 
-# 7. occupied、purchased 和 Reservation 不得混淆
+# 7. 当前 P/A/R 与未来 Reservation 不得混淆
 
-必须始终区分：
+Phase 10 当前同步模型必须始终区分：
 
-`occupied`
-
-=
-临时抢票占位
-
-`purchased`
+`P:<admissionId>`
 
 =
-历史成功购买事实
+Redis 已扣 admission stock、MySQL 结果尚未完成 settle 的 pending admission
 
-`Reservation`
+`A:<orderId>`
 
 =
-一次异步抢票请求及其处理状态
+已提交 `WAIT_PAY` Order 对应的 active admission
 
-当前 Refund Foundation（`CURRENT / FROZEN / IMPLEMENTED`）可以恢复库存，
-但不能因为退款删除历史 purchased 资格。
+`R:<orderId>`
 
-重复 Reservation 请求不得重复扣减库存。
+=
+已 Refund 的历史 admission；不再占用 stock，但继续阻止同用户再次 admission
+
+Cancel / Timeout 只释放匹配的 `A`；Refund 只把匹配的 `A` 转为 `R`；Pay 不修改
+Redis。未来 persistent Reservation / occupied / purchased 模型尚未冻结，不得覆盖
+当前 P/A/R Contract。
+
+重复 admission 或 lifecycle synchronization 不得重复扣减或恢复库存。
 
 详细规则见：
 
@@ -343,8 +341,8 @@ Redisson Distributed Lock
 
 # 9. 故障策略必须区分 NORMAL 与 FLASH
 
-FLASH Fail Fast / Fail Closed 是 Phase 10 `CURRENT PHASE / FROZEN DESIGN /
-NOT_IMPLEMENTED` 的新请求故障 Contract。
+FLASH Fail Fast / Fail Closed 是 Phase 10 `CURRENT / IMPLEMENTED / VERIFIED /
+FROZEN` 的新请求故障 Contract。
 
 NORMAL：
 
@@ -363,6 +361,10 @@ Fail Fast。
 
 Redis Down
 → FLASH 全部直打 MySQL
+
+MySQL lifecycle commit 后的 Redis synchronization 是 best-effort；Redis failure
+不得反转已提交的数据库结果。当前不提供 automatic retry、reconciliation 或
+Redis crash recovery，必须如实保留该限制。
 
 详细故障与补偿规则见：
 
