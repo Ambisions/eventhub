@@ -1,9 +1,9 @@
 package com.eventhub.controller.order;
 
 import com.eventhub.application.flash.FlashOrderLifecycleApplicationService;
+import com.eventhub.application.notification.PaymentNotificationApplicationService;
 import com.eventhub.controller.order.dto.OrderResponse;
 import com.eventhub.controller.order.dto.RefundResponse;
-import com.eventhub.order.api.OrderCommandApi;
 import com.eventhub.order.api.OrderQueryApi;
 import com.eventhub.order.api.model.PaymentResult;
 import com.eventhub.security.EventHubAuthenticatedUser;
@@ -19,15 +19,15 @@ import org.springframework.web.bind.annotation.RestController;
 public final class OrderController {
 
     private final OrderQueryApi orderQueryApi;
-    private final OrderCommandApi orderCommandApi;
+    private final PaymentNotificationApplicationService paymentNotificationApplicationService;
     private final FlashOrderLifecycleApplicationService flashOrderLifecycleApplicationService;
 
     public OrderController(
             OrderQueryApi orderQueryApi,
-            OrderCommandApi orderCommandApi,
+            PaymentNotificationApplicationService paymentNotificationApplicationService,
             FlashOrderLifecycleApplicationService flashOrderLifecycleApplicationService) {
         this.orderQueryApi = orderQueryApi;
-        this.orderCommandApi = orderCommandApi;
+        this.paymentNotificationApplicationService = paymentNotificationApplicationService;
         this.flashOrderLifecycleApplicationService = flashOrderLifecycleApplicationService;
     }
 
@@ -42,7 +42,7 @@ public final class OrderController {
     public PaymentResult pay(
             @AuthenticationPrincipal EventHubAuthenticatedUser currentUser,
             @PathVariable long orderId) {
-        return orderCommandApi.pay(currentUser.userId(), orderId);
+        return paymentNotificationApplicationService.pay(currentUser.userId(), orderId);
     }
 
     @PostMapping("/{orderId}/cancel")

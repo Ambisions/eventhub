@@ -7,8 +7,9 @@ import java.time.ZoneOffset;
 import java.util.Locale;
 import java.util.UUID;
 
+import com.eventhub.application.notification.PaymentNotificationApplicationService;
 import com.eventhub.handler.GlobalExceptionHandler;
-import com.eventhub.order.api.OrderCommandApi;
+import com.eventhub.notification.api.NotificationEventPublisherApi;
 import com.eventhub.ticket.api.error.TicketErrorCode;
 import com.eventhub.ticket.api.error.TicketException;
 import com.eventhub.ticket.domain.TicketNumberGenerator;
@@ -27,6 +28,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest
@@ -41,7 +43,7 @@ class PaymentTicketAtomicityIntegrationTest {
     private static final LocalDateTime PAYMENT_NOW = LocalDateTime.ofInstant(PAYMENT_INSTANT, ZoneOffset.UTC);
 
     @Autowired
-    private OrderCommandApi orderCommandApi;
+    private PaymentNotificationApplicationService paymentNotificationApplicationService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -52,17 +54,21 @@ class PaymentTicketAtomicityIntegrationTest {
     @MockitoBean
     private TicketNumberGenerator ticketNumberGenerator;
 
+    @MockitoBean
+    private NotificationEventPublisherApi notificationEventPublisherApi;
+
     @Test
     void rollsBackOrderAndInventoryWhenTicketGeneratorFails() {
         Fixture fixture = createFixture("unknown-ticket-failure");
         RuntimeException failure = new RuntimeException("synthetic ticket generation failure");
         when(ticketNumberGenerator.generate()).thenThrow(failure);
 
-        assertThatThrownBy(() -> orderCommandApi.pay(fixture.userId(), fixture.orderId()))
+        assertThatThrownBy(() -> paymentNotificationApplicationService.pay(fixture.userId(), fixture.orderId()))
                 .isSameAs(failure);
 
         assertRolledBackPayment(fixture);
         assertThat(ticketCountByOrder(fixture.orderId())).isZero();
+        verifyNoInteractions(notificationEventPublisherApi);
     }
 
     @Test
@@ -74,12 +80,13 @@ class PaymentTicketAtomicityIntegrationTest {
         when(ticketNumberGenerator.generate()).thenReturn(collisionTicketNo);
 
         assertTicketError(
-                () -> orderCommandApi.pay(target.userId(), target.orderId()),
+                () -> paymentNotificationApplicationService.pay(target.userId(), target.orderId()),
                 TicketErrorCode.TICKET_ISSUANCE_FAILED);
 
         assertRolledBackPayment(target);
         assertThat(ticketCountByOrder(target.orderId())).isZero();
         assertThat(ticketCountByOrder(existing.orderId())).isEqualTo(1);
+        verifyNoInteractions(notificationEventPublisherApi);
     }
 
     @Test
@@ -90,12 +97,13 @@ class PaymentTicketAtomicityIntegrationTest {
         when(ticketNumberGenerator.generate()).thenReturn(syntheticTicketNo());
 
         assertTicketError(
-                () -> orderCommandApi.pay(fixture.userId(), fixture.orderId()),
+                () -> paymentNotificationApplicationService.pay(fixture.userId(), fixture.orderId()),
                 TicketErrorCode.TICKET_ALREADY_ISSUED);
 
         assertRolledBackPayment(fixture);
         assertThat(ticketCountByOrder(fixture.orderId())).isEqualTo(1);
         assertThat(ticketNoByOrder(fixture.orderId())).isEqualTo(existingTicketNo);
+        verifyNoInteractions(notificationEventPublisherApi);
     }
 
     @Test

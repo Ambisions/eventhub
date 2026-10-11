@@ -621,8 +621,12 @@ Future：Ticket 列表尚未实现
 ## eventhub-notification
 
 ```text
-Future Planned：Notification capability
-Not Yet Frozen：Exchange、Queue、Routing Key、persistence、retry/DLQ topology
+Current Frozen / Implemented：TicketIssuedEvent contract、durable direct RabbitMQ topology、
+persistent JSON publisher adapter、user_notification persistence foundation
+Current Producer Integration：successful Pay returns before event construction / publish；
+notification-stage failure does not reverse the committed Pay result
+Not Implemented：Consumer、broker-outage recovery、Publisher Confirm / Return、Outbox、
+Retry / DLQ；transport exactly-once is not claimed
 
 ```
 
@@ -1106,7 +1110,10 @@ DECR
 
 FLASH 使用 Transactional Outbox → RabbitMQ → Idempotent Consumer 的方向为
 `FUTURE / FROZEN / NOT_IMPLEMENTED`。以下队列名只是设计示例，不构成拓扑
-Freeze；Notification topology 与 Timeout 的 TTL/DLX 等机制均尚未冻结。
+Freeze。Notification 已独立冻结并实现 `TicketIssuedEvent` 的 durable direct
+Exchange / Queue / Binding、persistent JSON publisher，以及 successful Pay 返回后的
+best-effort post-commit publish；Consumer、broker-outage recovery、Publisher Confirm /
+Return、Outbox、Retry / DLQ 尚未实现。Timeout 的 TTL/DLX 等机制仍未冻结。
 
 队列示例：
 

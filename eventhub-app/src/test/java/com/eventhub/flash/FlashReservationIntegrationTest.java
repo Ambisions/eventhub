@@ -17,6 +17,7 @@ import com.eventhub.auth.api.model.AccessTokenContract;
 import com.eventhub.inventory.api.FlashAdmissionApi;
 import com.eventhub.inventory.api.command.ReserveFlashAdmissionCommand;
 import com.eventhub.inventory.api.model.FlashAdmissionResult;
+import com.eventhub.notification.api.NotificationEventPublisherApi;
 import com.eventhub.order.api.OrderTimeoutApi;
 import com.eventhub.application.flash.FlashOrderLifecycleApplicationService;
 import com.eventhub.scheduler.OrderTimeoutScheduler;
@@ -37,6 +38,7 @@ import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -77,6 +79,9 @@ class FlashReservationIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @MockitoBean
+    private NotificationEventPublisherApi notificationEventPublisherApi;
 
     private final List<Long> sessionIds = new ArrayList<>();
     private final List<Long> eventIds = new ArrayList<>();

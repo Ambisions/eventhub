@@ -21,6 +21,8 @@ import com.eventhub.auth.api.command.RegisterCommand;
 import com.eventhub.auth.api.model.AccessToken;
 import com.eventhub.inventory.api.error.InventoryErrorCode;
 import com.eventhub.inventory.api.error.InventoryException;
+import com.eventhub.notification.api.NotificationEventPublisherApi;
+import com.eventhub.notification.api.event.TicketIssuedEvent;
 import com.eventhub.order.api.OrderCommandApi;
 import com.eventhub.order.api.OrderQueryApi;
 import com.eventhub.order.api.error.OrderErrorCode;
@@ -30,19 +32,26 @@ import com.eventhub.ticket.api.model.TicketStatus;
 import com.eventhub.user.api.model.UserProfile;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -74,6 +83,9 @@ class OrderLifecycleIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @MockitoBean
+    private NotificationEventPublisherApi notificationEventPublisherApi;
 
     @Test
     void paysAndRejectsRepeatedPayWithoutDoubleSelling() {
@@ -231,6 +243,14 @@ class OrderLifecycleIntegrationTest {
         mockMvc.perform(post("/api/orders/{id}/cancel", payOrder).header("Authorization", bearer(other)))
                 .andExpect(status().isNotFound());
 
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            assertThat(orderStatus(payOrder)).isEqualTo("PAID");
+            assertThat(inventory(payFixture.sessionId())).isEqualTo(new InventoryState(1, 0, 0, 1));
+            assertThat(ticketByOrder(payOrder).status()).isEqualTo("VALID");
+            return null;
+        }).when(notificationEventPublisherApi).publishTicketIssued(any());
+
         mockMvc.perform(post("/api/orders/{id}/pay", payOrder)
                         .header("Authorization", bearer(owner))
                         .header("X-User-Id", Long.toString(other.profile().getId()))
@@ -275,6 +295,15 @@ class OrderLifecycleIntegrationTest {
         assertThat(orderStatus(duplicateTicketOrder)).isEqualTo("WAIT_PAY");
         assertThat(inventory(duplicateTicketFixture.sessionId()))
                 .isEqualTo(new InventoryState(1, 0, 1, 0));
+
+        ArgumentCaptor<TicketIssuedEvent> eventCaptor = ArgumentCaptor.forClass(TicketIssuedEvent.class);
+        verify(notificationEventPublisherApi, times(1)).publishTicketIssued(eventCaptor.capture());
+        TicketIssuedEvent event = eventCaptor.getValue();
+        assertThat(event.userId()).isEqualTo(owner.profile().getId());
+        assertThat(event.orderId()).isEqualTo(payOrder);
+        assertThat(event.sessionId()).isEqualTo(payFixture.sessionId());
+        assertThat(event.ticketNo()).isEqualTo(ticketByOrder(payOrder).ticketNo());
+        assertThat(event.occurredAt()).isEqualTo(FIXED_INSTANT);
         assertThat(ticketCountByOrder(duplicateTicketOrder)).isEqualTo(1);
 
         mockMvc.perform(get("/api/sessions/{id}", payFixture.sessionId())).andExpect(status().isOk());

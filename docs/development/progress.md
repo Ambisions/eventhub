@@ -864,7 +864,7 @@ Status: `COMPLETE / FROZEN`
 
 ### Batch 2 — V5 + Notification Foundation
 
-Status: `COMPLETE / VERIFIED`
+Status: `COMPLETE / VERIFIED / FROZEN`
 
 - Flyway V5 creates only the `user_notification` persistence foundation. Fresh
   MySQL 8.4.11 verification applied V1 through V5 from zero business tables,
@@ -881,5 +881,26 @@ Status: `COMPLETE / VERIFIED`
   and Test Reviewer passed with no findings or blocking verification gap.
 
 ### Batch 3 — Payment Notification Orchestration
+
+Status: `COMPLETE / VERIFIED`
+
+- `eventhub-app` now owns the post-commit Pay notification orchestration: a successful
+  `OrderCommandApi.pay(...)` result is converted into one `TicketIssuedEvent` publisher
+  invocation only after the Order/Inventory/Ticket transaction has returned successfully.
+- Notification event construction or publishing remains best-effort and cannot reverse the
+  committed Pay result. Pay, transaction, and Ticket failures produce no notification;
+  repeat, expired, and duplicate-Ticket Pay paths do not publish a success event.
+- Real MySQL 8.4.11 and RabbitMQ 4.3.5 verification proved committed database visibility,
+  the exact durable route, persistent JSON message and frozen event fields. The final fresh
+  Root + 9 Module `clean verify` passed 71 suites / 338 tests with zero failures, errors,
+  or skips; Spring Boot repackage succeeded.
+- Formal Reviewer reported Blocker `0`, Major `0`, Minor `0`, and Needs Verification `0`.
+  The Phase-level Test Reviewer marked all 18 applicable properties `PROVEN`, with no
+  blocking verification gap. Final MySQL, Redis, RabbitMQ queue, and AMQP connection
+  residue checks were zero.
+- Consumer processing, broker-outage recovery, Publisher Confirm/Return, Outbox, Retry,
+  and DLQ remain deferred; transport exactly-once is not claimed.
+
+### Batch 4 — Notification Consumer
 
 Status: `NOT STARTED`
