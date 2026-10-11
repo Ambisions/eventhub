@@ -622,11 +622,14 @@ Future：Ticket 列表尚未实现
 
 ```text
 Current Frozen / Implemented：TicketIssuedEvent contract、durable direct RabbitMQ topology、
-persistent JSON publisher adapter、user_notification persistence foundation
+persistent JSON publisher adapter、user_notification persistence、Rabbit listener consumer
 Current Producer Integration：successful Pay returns before event construction / publish；
 notification-stage failure does not reverse the committed Pay result
-Not Implemented：Consumer、broker-outage recovery、Publisher Confirm / Return、Outbox、
-Retry / DLQ；transport exactly-once is not claimed
+Current Consumer Baseline：AUTO acknowledgement + rejected message no-requeue；通过
+event_id 与 (type, business_reference) 数据库唯一约束及持久化事实等价校验实现
+TicketIssuedEvent 的重复消费保护；冲突或无法处理的消息按当前 baseline 丢弃
+Not Implemented：broker-outage recovery、Publisher Confirm / Return、Outbox、Retry / DLQ、
+guaranteed delivery；transport exactly-once 与完整 At-Least-Once reliability 均不声明
 
 ```
 
@@ -1112,8 +1115,11 @@ FLASH 使用 Transactional Outbox → RabbitMQ → Idempotent Consumer 的方向
 `FUTURE / FROZEN / NOT_IMPLEMENTED`。以下队列名只是设计示例，不构成拓扑
 Freeze。Notification 已独立冻结并实现 `TicketIssuedEvent` 的 durable direct
 Exchange / Queue / Binding、persistent JSON publisher，以及 successful Pay 返回后的
-best-effort post-commit publish；Consumer、broker-outage recovery、Publisher Confirm /
-Return、Outbox、Retry / DLQ 尚未实现。Timeout 的 TTL/DLX 等机制仍未冻结。
+best-effort post-commit publish。Notification Consumer 已使用 Spring AMQP `AUTO` ACK、
+no-requeue failure-discard baseline 将事件投影到 `user_notification`，并通过
+`event_id` 与 `(type, business_reference)` 唯一约束加持久化事实等价校验防止重复写入。
+broker-outage recovery、Publisher Confirm / Return、Outbox、Retry / DLQ、guaranteed
+delivery 与完整 At-Least-Once reliability 尚未实现。Timeout 的 TTL/DLX 等机制仍未冻结。
 
 队列示例：
 

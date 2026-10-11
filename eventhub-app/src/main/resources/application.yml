@@ -18,6 +18,10 @@ spring:
     username: ${RABBITMQ_DEFAULT_USER}
     password: ${RABBITMQ_DEFAULT_PASS}
     connection-timeout: 5s
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
 
 eventhub:
   order:

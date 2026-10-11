@@ -1,3 +1,9 @@
+spring:
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
+
 # TEST ONLY - this deterministic key is not a production secret.
 eventhub:
   order:

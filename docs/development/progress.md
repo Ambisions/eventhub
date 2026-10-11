@@ -903,4 +903,28 @@ Status: `COMPLETE / VERIFIED`
 
 ### Batch 4 — Notification Consumer
 
+Status: `COMPLETE / VERIFIED`
+
+- `eventhub-notification` now owns the `TicketIssuedEvent` Rabbit listener and the
+  transactional `user_notification` persistence service. Successful messages persist the
+  frozen projection with UTC microsecond `occurred_at`; MySQL supplies `created_at`.
+- Consumer idempotency uses both V5 database safety lines: unique `event_id` and unique
+  `(type, business_reference)`. Equivalent duplicates are accepted only after the persisted
+  facts are verified; conflicting event, business, cross-identity, or timestamp facts fail.
+- The current listener baseline uses Spring AMQP `AUTO` acknowledgement with rejected
+  messages not requeued. Real RabbitMQ/MySQL tests verified successful consumption,
+  sequential and concurrent duplicates, malformed JSON, unsupported schema versions,
+  database failures, and Pay → RabbitMQ → Consumer → MySQL composition.
+- The post-review final Root + 9 Module `clean verify` passed 76 suites / 362 tests with
+  zero failures, errors, or skips; Spring Boot repackage succeeded. Database duplicate and
+  synthetic residue were zero, and the Rabbit queue ended with zero ready, unacknowledged,
+  and consumer counts plus zero application connections.
+- Formal Reviewer and Phase-level Test Reviewer both reported Blocker `0`, Major `0`,
+  Minor `0`, with no required follow-up or blocking verification gap.
+- This Batch proves the current failure-discard / non-requeue consumer foundation only.
+  Broker-outage recovery, Publisher Confirm/Return, Transactional Outbox, Retry, DLQ,
+  guaranteed delivery, and full At-Least-Once reliability remain `NOT IMPLEMENTED`.
+
+### Batch 5
+
 Status: `NOT STARTED`
