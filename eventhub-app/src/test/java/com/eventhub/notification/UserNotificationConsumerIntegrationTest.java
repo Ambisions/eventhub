@@ -3,6 +3,7 @@ package com.eventhub.notification;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Set;
@@ -16,10 +17,12 @@ import java.util.concurrent.TimeUnit;
 
 import com.eventhub.notification.api.event.TicketIssuedEvent;
 import com.eventhub.notification.consumer.TicketIssuedNotificationConsumer;
+import com.eventhub.notification.service.UserNotificationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -33,6 +36,9 @@ class UserNotificationConsumerIntegrationTest {
 
     @Autowired
     private TicketIssuedNotificationConsumer consumer;
+
+    @Autowired
+    private UserNotificationService userNotificationService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -149,6 +155,26 @@ class UserNotificationConsumerIntegrationTest {
         assertThat(countByEvent(invalidForV5.eventId().toString())).isZero();
     }
 
+    @Test
+    void rejectsARealMysqlPrimaryDuplicateAsAnUnknownConstraint() {
+        long primaryKey = -Math.max(1L, UUID.randomUUID().getMostSignificantBits() & Long.MAX_VALUE);
+        TicketIssuedEvent persisted = event(UUID.randomUUID(), USER_ID, ticketNo(), OCCURRED_AT);
+        TicketIssuedEvent attempted = event(
+                UUID.randomUUID(), USER_ID, ticketNo(), OCCURRED_AT.plusSeconds(1));
+
+        insertWithExplicitPrimaryKey(primaryKey, persisted);
+        DuplicateKeyException duplicate = attemptDuplicatePrimaryKey(primaryKey, attempted);
+        SQLException sqlException = findSqlException(duplicate);
+
+        assertThat(sqlException.getErrorCode()).isEqualTo(1062);
+        assertThat(sqlException.getSQLState()).isEqualTo("23000");
+        assertThat(sqlException.getMessage()).containsIgnoringCase("PRIMARY");
+        assertThatThrownBy(() -> userNotificationService.verifyEquivalentDuplicate(attempted, duplicate))
+                .isSameAs(duplicate);
+        assertThat(countByEvent(persisted.eventId().toString())).isEqualTo(1);
+        assertThat(countByEvent(attempted.eventId().toString())).isZero();
+    }
+
     @AfterEach
     void cleanupAndVerifyNoSyntheticResidue() {
         eventIds.forEach(eventId -> jdbcTemplate.update(
@@ -175,6 +201,38 @@ class UserNotificationConsumerIntegrationTest {
             executor.shutdownNow();
             assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
         }
+    }
+
+    private void insertWithExplicitPrimaryKey(long primaryKey, TicketIssuedEvent event) {
+        jdbcTemplate.update(
+                "INSERT INTO user_notification "
+                        + "(id, event_id, user_id, type, business_reference, occurred_at) "
+                        + "VALUES (?, ?, ?, 'TICKET_ISSUED', ?, ?)",
+                primaryKey,
+                event.eventId().toString(),
+                event.userId(),
+                event.ticketNo(),
+                LocalDateTime.ofInstant(event.occurredAt(), java.time.ZoneOffset.UTC));
+    }
+
+    private DuplicateKeyException attemptDuplicatePrimaryKey(long primaryKey, TicketIssuedEvent event) {
+        try {
+            insertWithExplicitPrimaryKey(primaryKey, event);
+        } catch (DuplicateKeyException exception) {
+            return exception;
+        }
+        throw new AssertionError("Expected MySQL PRIMARY duplicate");
+    }
+
+    private static SQLException findSqlException(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof SQLException sqlException) {
+                return sqlException;
+            }
+            current = current.getCause();
+        }
+        throw new AssertionError("Expected SQLException in duplicate exception chain", exception);
     }
 
     private void consumeAfterBarrier(

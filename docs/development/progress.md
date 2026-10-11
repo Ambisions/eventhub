@@ -925,6 +925,32 @@ Status: `COMPLETE / VERIFIED`
   Broker-outage recovery, Publisher Confirm/Return, Transactional Outbox, Retry, DLQ,
   guaranteed delivery, and full At-Least-Once reliability remain `NOT IMPLEMENTED`.
 
-### Batch 5
+### Batch 5 — Real RabbitMQ Failure / Idempotency Verification
+
+Status: `COMPLETE / VERIFIED`
+
+- A fresh isolated MySQL 8.4.11, Redis 8.2.9, and RabbitMQ 4.3.5 runtime applied
+  Flyway V1 through V5 from an empty schema and remained stable on the second run.
+- Real Rabbit connection refusal proved that post-commit notification publishing failure
+  does not reverse the successful Pay result: HTTP remained 200, Order remained `PAID`,
+  Inventory remained sold, Ticket remained `VALID`, and no notification row was created.
+- Real RabbitMQ/MySQL verification covered equivalent and conflicting duplicates,
+  cross-identity conflict, concurrent duplicates, and an unknown MySQL `PRIMARY` duplicate
+  (`1062` / `23000`) that is not accepted as idempotent success.
+- The current `AUTO` acknowledgement / no-requeue failure-discard behavior was verified for
+  malformed messages, unsupported schema versions, statement failure, and MySQL outage.
+  Consumer stop/start also proved durable queued delivery, persistence survival, and safe
+  duplicate redelivery.
+- Fresh Phase 6–11 targeted regression passed 20 suites / 100 tests. The final Root + 9
+  Module `clean verify` passed 77 suites / 365 tests with zero failures, errors, or skips;
+  Spring Boot repackage succeeded.
+- Formal Reviewer reported Blocker `0`, Major `0`, Minor `1` (non-blocking test-observability
+  follow-up). Phase-level Test Reviewer reported `PROVEN: 20`, `PARTIALLY_PROVEN: 0`,
+  `NOT_PROVEN: 0`, `NOT_APPLICABLE: 5`, and `Blocking Verification Gap: NO`.
+- Publisher Confirm/Return, Transactional Outbox, automatic backfill, Retry/DLQ,
+  protocol-level ambiguous commit recovery, exact JVM crash-window recovery, and guaranteed
+  delivery remain future reliability work and are not claimed by this Batch.
+
+### Batch 6
 
 Status: `NOT STARTED`

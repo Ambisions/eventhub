@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.locks.LockSupport;
@@ -97,6 +98,12 @@ class NotificationConsumerRabbitIntegrationTest {
         await("conflict fixture committed", () -> countByEvent(persisted.eventId().toString()) == 1);
         awaitQueueEmpty();
 
+        TicketIssuedEvent other = event(
+                UUID.randomUUID(), USER_ID + 1, ticketNo(), OCCURRED_AT.plusSeconds(1));
+        publish(other);
+        await("second conflict fixture committed", () -> countByEvent(other.eventId().toString()) == 1);
+        awaitQueueEmpty();
+
         TicketIssuedEvent conflict = event(
                 persisted.eventId(), USER_ID + 1, persisted.ticketNo(), OCCURRED_AT);
         publish(conflict);
@@ -104,6 +111,10 @@ class NotificationConsumerRabbitIntegrationTest {
         TicketIssuedEvent occurredAtConflict = event(
                 persisted.eventId(), USER_ID, persisted.ticketNo(), OCCURRED_AT.plusSeconds(1));
         publish(occurredAtConflict);
+
+        TicketIssuedEvent crossIdentityConflict = event(
+                persisted.eventId(), other.userId(), other.ticketNo(), other.occurredAt());
+        publish(crossIdentityConflict);
 
         sendRawJson("{not-valid-json");
         awaitQueueEmpty();
@@ -127,10 +138,54 @@ class NotificationConsumerRabbitIntegrationTest {
         awaitQueueEmpty();
         assertThat(countByTicket(persisted.ticketNo())).isEqualTo(1);
         assertThat(userIdByEvent(persisted.eventId().toString())).isEqualTo(USER_ID);
+        assertThat(countByTicket(other.ticketNo())).isEqualTo(1);
+        assertThat(userIdByEvent(other.eventId().toString())).isEqualTo(USER_ID + 1);
+    }
+
+    @Test
+    void queuesWhileConsumerIsStoppedThenConsumesAfterRestartAndHandlesRedelivery() {
+        TicketIssuedEvent queued = event(UUID.randomUUID(), USER_ID, ticketNo(), OCCURRED_AT);
+
+        stopListeners();
+        await("notification listener stopped", () -> listenerRegistry.getListenerContainers().stream()
+                .noneMatch(container -> container.isRunning()));
+        await("notification broker consumer removed", () -> consumerCount() == 0);
+
+        publish(queued);
+        await("message ready while consumer stopped", () -> readyMessageCount() == 1);
+        assertThat(countByEvent(queued.eventId().toString())).isZero();
+
+        startListeners();
+        await("notification listener restarted", () -> listenerRegistry.getListenerContainers().stream()
+                .allMatch(container -> container.isRunning()));
+        await("notification broker consumer restored", () -> consumerCount() > 0);
+        await("queued notification committed after restart", () -> countByEvent(queued.eventId().toString()) == 1);
+        awaitQueueEmpty();
+
+        stopListeners();
+        await("notification listener stopped after commit", () -> listenerRegistry.getListenerContainers().stream()
+                .noneMatch(container -> container.isRunning()));
+        assertThat(countByEvent(queued.eventId().toString())).isEqualTo(1);
+
+        startListeners();
+        await("notification listener restarted for redelivery", () -> listenerRegistry.getListenerContainers().stream()
+                .allMatch(container -> container.isRunning()));
+        TicketIssuedEvent sentinel = event(
+                UUID.randomUUID(), USER_ID, ticketNo(), OCCURRED_AT.plusSeconds(1));
+        publish(queued);
+        publish(sentinel);
+        await("redelivery and sentinel processed", () -> countByEvent(sentinel.eventId().toString()) == 1);
+        awaitQueueEmpty();
+
+        assertThat(countByEvent(queued.eventId().toString())).isEqualTo(1);
+        assertThat(countByTicket(queued.ticketNo())).isEqualTo(1);
     }
 
     @AfterEach
     void cleanupAndVerifyNoRabbitOrDatabaseResidue() {
+        startListeners();
+        await("notification listener running for cleanup", () -> listenerRegistry.getListenerContainers().stream()
+                .allMatch(container -> container.isRunning()));
         rabbitAdmin.purgeQueue(NotificationRabbitTopology.TICKET_ISSUED_QUEUE, false);
         eventIds.forEach(eventId -> jdbcTemplate.update(
                 "DELETE FROM user_notification WHERE event_id = ?", eventId));
@@ -177,6 +232,27 @@ class NotificationConsumerRabbitIntegrationTest {
         Long count = rabbitTemplate.execute(channel ->
                 channel.messageCount(NotificationRabbitTopology.TICKET_ISSUED_QUEUE));
         return count == null ? -1 : Math.toIntExact(count);
+    }
+
+    private int consumerCount() {
+        Properties properties = rabbitAdmin.getQueueProperties(NotificationRabbitTopology.TICKET_ISSUED_QUEUE);
+        if (properties == null) {
+            return -1;
+        }
+        Object count = properties.get(RabbitAdmin.QUEUE_CONSUMER_COUNT);
+        return count instanceof Number number ? number.intValue() : -1;
+    }
+
+    private void stopListeners() {
+        listenerRegistry.getListenerContainers().forEach(container -> container.stop());
+    }
+
+    private void startListeners() {
+        listenerRegistry.getListenerContainers().forEach(container -> {
+            if (!container.isRunning()) {
+                container.start();
+            }
+        });
     }
 
     private long userIdByEvent(String eventId) {
