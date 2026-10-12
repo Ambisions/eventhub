@@ -1,10 +1,10 @@
 # EventHub V1 Baseline Indexes
 
-Status: `V1 FROZEN / IMPLEMENTED / RUNTIME VERIFIED; V2 FROZEN / IMPLEMENTED / RUNTIME VERIFIED`
+Status: `V1 / V2 / V3 / V4 / V5 FROZEN / IMPLEMENTED / RUNTIME VERIFIED`
 
-This document records the minimal index set for the six-table Phase 3 baseline.
-Unique constraints create their own supporting indexes and must not be duplicated by
-equivalent non-unique indexes.
+This document records the minimal index set for the six-table Phase 3 baseline and
+its verified V2-V5 schema evolution. Unique constraints create their own supporting
+indexes and must not be duplicated by equivalent non-unique indexes.
 
 | Table | Index | Columns | Query scenario |
 | --- | --- | --- | --- |
@@ -21,6 +21,8 @@ equivalent non-unique indexes.
 | `ticket` | `uk_ticket_ticket_no` | `ticket_no` | Public ticket lookup. |
 | `ticket` | `uk_ticket_order` | `order_id` | One ticket per order and order-to-ticket lookup. |
 | `ticket` | `uk_ticket_user_session` | `user_id, session_id` | V1 one-user-one-session final guard and ownership lookup. |
+| `user_notification` | `uk_user_notification_event` | `event_id` | Event-identity idempotency safety line. |
+| `user_notification` | `uk_user_notification_business` | `type, business_reference` | Business-identity idempotency safety line for Ticket-issued notifications. |
 
 ## Explicitly Deferred
 
@@ -29,8 +31,8 @@ equivalent non-unique indexes.
 filter that has not yet been implemented. A later real query may replace or extend
 this index after SQL shape and `EXPLAIN` evidence are available.
 
-No waiting-list, FLASH reservation, outbox, consumer-idempotency, notification, or
-message-reliability indexes are created before their tables and query paths exist.
+No waiting-list, separate FLASH reservation, outbox, or future message-reliability
+indexes are created before their tables and query paths exist.
 
 ## Phase 5 V2 Verified Index Decision
 
@@ -45,9 +47,28 @@ V2 adds no business index:
 No existing V1 index is changed. Predictive role or rejection-reason indexes may be
 considered only after a real query path and, where relevant, `EXPLAIN` evidence exist.
 
+## Phase 9 V3 and Phase 10 V4 Verified Index Decision
+
+V3 changes only the Order/Ticket status checks and generated `purchase_guard`
+expression. V4 adds only `event_sessions.sale_mode` and its check. Neither migration
+adds, removes, or changes an index.
+
+## Phase 11 V5 Verified Index Decision
+
+V5 creates exactly two unique indexes through named unique constraints:
+
+- `uk_user_notification_event` on `event_id` prevents duplicate event identity.
+- `uk_user_notification_business` on `(type, business_reference)` prevents duplicate
+  projection of the same Ticket-issued business fact.
+
+No additional lookup, delivery-status, retry, Outbox, or speculative Notification
+index is present. Fresh MySQL 8.4.11 metadata and behavior verification confirmed both
+unique keys and rejected duplicates on each identity.
+
 ## Verification Boundary
 
 The V1 index set has been verified against real MySQL metadata. Runtime metadata also
-confirmed that V2 adds no index for `users.role` or `events.rejection_reason` and does
-not change an existing V1 index. Future query-plan claims require the corresponding
-SQL plus `EXPLAIN`; benchmark claims require measured evidence.
+confirmed that V2 adds no index, V3 and V4 do not change the index set, and V5 adds
+only the two unique Notification safety lines documented above. Future query-plan
+claims require the corresponding SQL plus `EXPLAIN`; benchmark claims require measured
+evidence.

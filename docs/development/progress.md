@@ -856,7 +856,7 @@ Status: `COMPLETE / VERIFIED / FROZEN`
 
 ## Phase 11 — RabbitMQ Notification Foundation
 
-Status: `IN PROGRESS`
+Status: `COMPLETE / VERIFIED`
 
 ### Batch 1 — Contract / Architecture
 
@@ -953,4 +953,27 @@ Status: `COMPLETE / VERIFIED`
 
 ### Batch 6
 
-Status: `NOT STARTED`
+Status: `COMPLETE / VERIFIED`
+
+- A fresh isolated runtime used MySQL 8.4.11, Redis 8.2.9, and RabbitMQ 4.3.5.
+  Flyway applied V1 through V5 from zero EventHub business tables, recorded five
+  successful migrations with no failure, and reported the schema up to date on the
+  second run.
+- The 13-class Notification targeted verification passed 44 tests with zero failures,
+  errors, or skips. Fresh real-failure evidence covered Rabbit connection refusal after
+  committed Pay, MySQL unavailability during live consumption, no-requeue rejection,
+  recovery with a new sentinel message, and zero notification residue.
+- Fresh Phase 0-10 preservation verification passed 24 integration classes / 131 tests
+  with zero failures, errors, or skips. The final Root + 9 Module `clean verify` passed
+  77 suites / 365 tests with zero failures, errors, or skips; Spring Boot repackage
+  succeeded.
+- Final residue checks found zero notification rows, duplicate identity groups, invalid
+  notification types, Redis EventHub fixture keys, Rabbit ready/unacknowledged messages,
+  consumers, and application AMQP connections.
+- Formal Reviewer reported Blocker `0`, Major `0`, Minor `0`, and Needs Verification
+  `0`. Phase-level Test Reviewer reported `PROVEN: 18`, `PARTIALLY_PROVEN: 0`,
+  `NOT_PROVEN: 0`, `N/A - Future: 4`, and `Blocking Verification Gap: NO`.
+- Phase 11 remains a best-effort post-commit Notification foundation with Spring AMQP
+  `AUTO` acknowledgement and no-requeue failure discard. Publisher Confirm/Return,
+  Transactional Outbox, guaranteed broker-outage recovery, Retry/DLQ, and exact JVM
+  crash-window recovery remain future reliability work.
