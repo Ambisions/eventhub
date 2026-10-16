@@ -169,17 +169,17 @@ The tracked [`docker-compose.yml`](../../docker-compose.yml) starts:
 
 | Service | Image | Host port | Health check |
 | --- | --- | --- | --- |
-| MySQL | `mysql:8.4.11` | `3306` | `mysqladmin ping` |
-| Redis | `redis:8.2.9` | `6379` | `redis-cli ping` |
-| RabbitMQ | `rabbitmq:4.3.5-management` | `5672` | `rabbitmq-diagnostics -q ping` |
-| RabbitMQ Management UI | same container | `15672` | RabbitMQ health check |
+| MySQL | `mysql:8.4.11` | `127.0.0.1:3306` | `mysqladmin ping` |
+| Redis | `redis:8.2.9` | `127.0.0.1:6379` | `redis-cli ping` |
+| RabbitMQ | `rabbitmq:4.3.5-management` | `127.0.0.1:5672` | `rabbitmq-diagnostics -q ping` |
+| RabbitMQ Management UI | same container | `127.0.0.1:15672` | RabbitMQ health check |
 
 ```sh
 docker compose up -d
 docker compose ps
 ```
 
-Wait until MySQL, Redis, and RabbitMQ all report `healthy`. The RabbitMQ Management UI is optional for local diagnostics. This Compose topology is for local development, not production deployment.
+Wait until MySQL, Redis, and RabbitMQ all report `healthy`. The default published ports bind only to IPv4 loopback; do not remove that boundary when using the public local-development example credentials. The RabbitMQ Management UI is optional for local diagnostics. This Compose topology is for local development, not production deployment.
 
 The application does not expose `/actuator/health`; do not use that path as a readiness check.
 
@@ -206,18 +206,18 @@ The POSIX command intentionally invokes `sh`: `mvnw` is currently tracked with G
 PowerShell:
 
 ```powershell
-java -jar .\eventhub-app\target\eventhub-app.jar
+java -jar .\eventhub-app\target\eventhub-app.jar --server.address=127.0.0.1
 ```
 
 POSIX:
 
 ```sh
-java -jar eventhub-app/target/eventhub-app.jar
+java -jar eventhub-app/target/eventhub-app.jar --server.address=127.0.0.1
 ```
 
-The actual JAR name is `eventhub-app.jar`, as fixed by the application POM. Keep the application in the same terminal session that contains the imported environment variables. The process uses Spring Boot's default HTTP port `8080`; the repository does not explicitly set `server.port`.
+The actual JAR name is `eventhub-app.jar`, as fixed by the application POM. Keep the application in the same terminal session that contains the imported environment variables. The process uses Spring Boot's default HTTP port `8080`; the repository does not explicitly set `server.port`. The command-line `--server.address=127.0.0.1` restricts these host-local startup examples to IPv4 loopback without changing `application.yml` or imposing a global/container deployment bind address.
 
-These build and startup commands are source-designed. A fresh-clone, cross-platform runtime execution has not yet been performed and remains part of Public Release Verification.
+Gate B verified Windows local fresh-clone packaging, Docker health, application startup, and the HTTP smoke path on the frozen baseline before this remediation. The new loopback bindings and startup flag have only been statically verified; this batch did not rerun Docker startup, application smoke, or Maven. POSIX/Linux/macOS and GitHub remote-clone workflows remain unverified.
 
 ## 8. Minimal HTTP smoke
 
@@ -232,7 +232,7 @@ Use a second terminal while the application is running. The synthetic credential
 ### PowerShell
 
 ```powershell
-$baseUri = 'http://localhost:8080'
+$baseUri = 'http://127.0.0.1:8080'
 $credentials = @{
     username = 'quickstart.user'
     password = 'LocalOnly-Password-42'
@@ -283,7 +283,7 @@ The access token remains only in the second terminal process.
 ### POSIX `curl`
 
 ```sh
-base_uri='http://localhost:8080'
+base_uri='http://127.0.0.1:8080'
 
 register_result=$(curl -sS -w '__HTTP_STATUS__:%{http_code}' \
   -H 'Content-Type: application/json' \
@@ -413,9 +413,12 @@ docker compose down -v
 | --- | --- |
 | Commands and paths checked against repository source | `SOURCE-DESIGNED` |
 | PowerShell and POSIX snippets statically checked | `STATICALLY VERIFIED` |
-| Existing HTTP integration tests inspected | `HISTORICAL TEST-PROVEN` |
-| Fresh clone | `NOT EXECUTED` |
-| Cross-platform build and startup | `NOT EXECUTED` |
-| Docker and application runtime smoke | `NOT EXECUTED` |
+| Gate B: Windows local fresh clone, packaging, and application startup | `PASS / VERIFIED` on the pre-remediation baseline |
+| Gate B: Docker health and Register → Login → `/api/users/me` smoke | `PASS / VERIFIED` on the pre-remediation baseline |
+| Gate C: Windows local fresh-clone full `clean verify`, 2026-10-16 | `BUILD SUCCESS`; Root + 9 Modules; 77 Suites / 365 Tests; Failures / Errors / Skipped = 0 / 0 / 0; Exit Code 0 |
+| Current loopback Compose bindings and local startup examples | `STATICALLY VERIFIED`; runtime not rerun after remediation |
+| Complete POSIX/Linux/macOS workflow and cross-platform behavior | `NOT EXECUTED` |
+| GitHub remote clone | `NOT EXECUTED` |
+| Public/production deployment | `NOT VERIFIED / NOT CLAIMED` |
 
-Fresh-clone and cross-platform runtime reproduction remain required before the initial public release is declared runtime-verified.
+Gate B/C evidence remains frozen against baseline commit `1625d2b8786966f81ebb038c595459aec3110c92`, before the current loopback remediation. This batch checks configuration and documentation statically only; it does not extend those runtime results to the modified configuration. The temporary isolated Gate C environment is not a production deployment recipe. Retain original logs, XML, local runtime paths, and credentials privately; only a reviewed, redacted verification summary is suitable for publication. Unverified platforms and GitHub remote cloning must not be described as passed.

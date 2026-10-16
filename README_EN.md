@@ -146,29 +146,30 @@ PowerShell:
 
 ```powershell
 .\mvnw.cmd -pl eventhub-app -am package -DskipTests
-java -jar .\eventhub-app\target\eventhub-app.jar
+java -jar .\eventhub-app\target\eventhub-app.jar --server.address=127.0.0.1
 ```
 
 POSIX:
 
 ```sh
 sh ./mvnw -pl eventhub-app -am package -DskipTests
-java -jar eventhub-app/target/eventhub-app.jar
+java -jar eventhub-app/target/eventhub-app.jar --server.address=127.0.0.1
 ```
 
 Minimal smoke path: `Register → Login → GET /api/users/me`. See the [HTTP API guide](docs/api/http-api.md) for requests and response contracts.
 
-These commands have been checked against the source, but a fresh-clone, cross-platform runtime verification for the initial public release has not yet been performed.
+The default Compose published ports and the local HTTP startup examples above are restricted to `127.0.0.1`; they are not a production deployment configuration. Gate B passed Windows local fresh-clone, Docker, application startup, and HTTP smoke verification on the frozen baseline before this remediation. The loopback changes have only been statically verified; Quick Start was not rerun. The complete POSIX/Linux/macOS workflow and GitHub remote cloning remain unverified.
 
 ## 8. Testing & Verification
 
-Latest frozen historical local verification (2026-10-12):
+Frozen local verification records (not rerun in this batch):
 
 | Scope | Suites | Tests | Failures | Errors | Skipped | Result |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Full Maven Reactor | 77 | 365 | 0 | 0 | 0 | `BUILD SUCCESS` |
+| 2026-10-12: historical Full Maven Reactor | 77 | 365 | 0 | 0 | 0 | `BUILD SUCCESS` |
+| 2026-10-16: Gate C, Windows local fresh-clone `clean verify` | 77 | 365 | 0 | 0 | 0 | `BUILD SUCCESS`, Exit Code `0` |
 
-This is a historical local verification record preserved in [development progress](docs/development/progress.md). It is not a GitHub CI status or a fresh runtime verification for this Public Release. The project currently has no publishable benchmark measurements and makes no QPS, TPS, P95/P99, or coverage claim.
+The 2026-10-12 entry is the historical baseline preserved in [development progress](docs/development/progress.md). Gate C is this Public Release's actual regression on the baseline before the loopback remediation, covering Root + 9 Modules; it does not verify a runtime rerun of the changed configuration. Neither record is a GitHub CI status, cross-platform verification, or production deployment verification. Keep raw logs, XML, and temporary credentials local; do not publish them. The project currently has no publishable benchmark measurements and makes no QPS, TPS, P95/P99, or coverage claim.
 
 ## 9. Documentation & Roadmap
 

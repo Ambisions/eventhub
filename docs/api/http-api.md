@@ -4,7 +4,7 @@
 
 ## 1. API conventions
 
-- 本地开发 base URL：`http://localhost:8080`。
+- 本地开发 base URL：`http://127.0.0.1:8080`；启动参数和监听边界见[本地开发指南](../deployment/local-development.md#7-start-eventhub)。
 - 除注册、登录和公开活动查询外，请求使用 `Authorization: Bearer <access-token>`。
 - 请求和响应采用 JSON；没有请求体的操作不应发送占位 JSON。
 - 创建用户、活动、场次和订单返回 `201 Created`；登出返回 `204 No Content`；其余成功响应默认返回 `200 OK`。
@@ -254,7 +254,7 @@ Minimal smoke 只需要普通用户完成 Register → Login → `/api/users/me`
 - 没有 ADMIN sign-up API。
 - Logout 不会主动撤销已签发 JWT。
 - 没有 Actuator health endpoint。
-- 本 Batch 没有启动 Docker、构建 Maven 或运行应用；Fresh Quick Start runtime 尚未验证。
+- Gate B 已在原冻结基线上验证 Windows 本地 fresh clone、Docker、应用启动及 Register → Login → `/api/users/me` HTTP Smoke；POSIX/Linux/macOS 完整工作流和 GitHub remote clone 尚未验证。
 
 本指南以以下源码为依据：
 
@@ -271,4 +271,4 @@ Minimal smoke 只需要普通用户完成 Register → Login → `/api/users/me`
 - [架构概览](../architecture/overview.md)
 - [核心流程](../architecture/core-flows.md)
 
-文档结论分层：endpoint、DTO、Security、错误映射与业务约束是 `SOURCE-GROUNDED`；已存在的 HTTP integration tests 提供 `HISTORICAL TEST-PROVEN` 证据；本文中的静态语法和链接检查是 `STATICALLY VERIFIED`；Fresh runtime 是 `NOT RUN`。
+文档结论分层：endpoint、DTO、Security、错误映射与业务约束是 `SOURCE-GROUNDED`；Gate B 提供原冻结基线上的 Windows 本地 Fresh Quick Start/HTTP Smoke 证据；Gate C 于 2026-10-16 完成该基线的 Windows 本地 fresh-clone 全量 `clean verify`，Root + 9 Modules、77 Suites / 365 Tests、Failures / Errors / Skipped = 0 / 0 / 0、Exit Code 0。当前 loopback Compose 与本地启动参数修正仅作 `STATICALLY VERIFIED`，没有重新运行 Maven、Docker 或 HTTP Smoke；不得将旧基线结果当作修改后配置的 runtime 验证。原始日志、XML 和临时凭据仅保留本地，不公开上传；未验证的平台、GitHub remote clone 和生产部署不作通过声明。

@@ -146,29 +146,30 @@ PowerShell：
 
 ```powershell
 .\mvnw.cmd -pl eventhub-app -am package -DskipTests
-java -jar .\eventhub-app\target\eventhub-app.jar
+java -jar .\eventhub-app\target\eventhub-app.jar --server.address=127.0.0.1
 ```
 
 POSIX：
 
 ```sh
 sh ./mvnw -pl eventhub-app -am package -DskipTests
-java -jar eventhub-app/target/eventhub-app.jar
+java -jar eventhub-app/target/eventhub-app.jar --server.address=127.0.0.1
 ```
 
 最小 Smoke Path：`Register → Login → GET /api/users/me`。请求示例和响应契约见 [HTTP API](docs/api/http-api.md)。
 
-这些命令已经过源码级核对，但尚未完成首次公开发布的 fresh-clone、跨平台 Runtime Verification。
+默认 Compose 发布端口和上述本地 HTTP 启动示例均限制到 `127.0.0.1`，不是生产部署配置。Gate B 已在修复前的冻结基线上通过 Windows 本地 fresh clone、Docker、应用启动和 HTTP Smoke；本次 loopback 调整仅作静态验证，未重新运行 Quickstart。POSIX/Linux/macOS 完整工作流和 GitHub remote clone 尚未验证。
 
 ## 8. 测试与验证
 
-最近冻结的历史本地验证记录（2026-10-12）：
+已冻结的本地验证记录（本 Batch 未重新执行）：
 
 | 范围 | Suites | Tests | Failures | Errors | Skipped | 结果 |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Full Maven Reactor | 77 | 365 | 0 | 0 | 0 | `BUILD SUCCESS` |
+| 2026-10-12：历史 Full Maven Reactor | 77 | 365 | 0 | 0 | 0 | `BUILD SUCCESS` |
+| 2026-10-16：Gate C，Windows 本地 fresh clone `clean verify` | 77 | 365 | 0 | 0 | 0 | `BUILD SUCCESS`，Exit Code `0` |
 
-该记录来自本地历史验证，并由[开发进度](docs/development/progress.md)保存；它不是 GitHub CI 状态，也不是本次 Public Release 的 fresh runtime 验证。项目当前没有可公开的 Benchmark 测量结果，不声明 QPS、TPS、P95/P99 或覆盖率数字。
+2026-10-12 条目是[开发进度](docs/development/progress.md)保存的历史基线；Gate C 是本次 Public Release 在 loopback 修复前基线上的真实回归，完整覆盖 Root + 9 Modules，不代表修改后的配置已重新运行。两者均不是 GitHub CI 状态、跨平台或生产部署验证。原始日志、XML 和临时凭据仅保留本地，不公开上传。项目当前没有可公开的 Benchmark 测量结果，不声明 QPS、TPS、P95/P99 或覆盖率数字。
 
 ## 9. 文档与路线图
 
