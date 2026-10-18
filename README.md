@@ -11,7 +11,7 @@
 ![RabbitMQ 4.3](https://img.shields.io/badge/RabbitMQ-4.3-FF6600?logo=rabbitmq&logoColor=white)
 ![License Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-D22128)
 
-EventHub 是一个运行于单 JVM 的 Java 模块化单体，围绕库存正确性、订单生命周期、FLASH 抢票入口控制和异步通知设计。MySQL 保存权威业务状态，Redis Lua 负责 FLASH admission，RabbitMQ 提供支付提交后的 best-effort 通知基础。高并发是架构目标，并非未经验证的性能结论。
+EventHub 是一个运行于单 JVM 的 Java 模块化单体，围绕库存正确性、订单生命周期、FLASH 抢票入口控制和异步通知设计。MySQL 保存权威业务状态，Redis Lua 负责 FLASH admission，RabbitMQ 提供支付提交后的 best-effort 通知基础。
 
 **核心亮点**
 
@@ -167,9 +167,9 @@ java -jar eventhub-app/target/eventhub-app.jar --server.address=127.0.0.1
 | 范围 | Suites | Tests | Failures | Errors | Skipped | 结果 |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | 2026-10-12：历史 Full Maven Reactor | 77 | 365 | 0 | 0 | 0 | `BUILD SUCCESS` |
-| 2026-10-16：Gate C，Windows 本地 fresh clone `clean verify` | 77 | 365 | 0 | 0 | 0 | `BUILD SUCCESS`，Exit Code `0` |
+| 2026-10-16：Windows 本地 fresh clone `clean verify` | 77 | 365 | 0 | 0 | 0 | `BUILD SUCCESS`，Exit Code `0` |
 
-2026-10-12 条目是[开发进度](docs/development/progress.md)保存的历史基线；Gate C 是本次 Public Release 在 loopback 修复前基线上的真实回归，完整覆盖 Root + 9 Modules，不代表修改后的配置已重新运行。两者均不是 GitHub CI 状态、跨平台或生产部署验证。原始日志、XML 和临时凭据仅保留本地，不公开上传。项目当前没有可公开的 Benchmark 测量结果，不声明 QPS、TPS、P95/P99 或覆盖率数字。
+ 条目是[开发进度](docs/development/progress.md)保存的历史基线；本次 Public Release 在 loopback 修复前基线上的真实回归，完整覆盖 Root + 9 Modules，不代表修改后的配置已重新运行。两者均不是 GitHub CI 状态、跨平台或生产部署验证。原始日志、XML 和临时凭据仅保留本地，不公开上传。项目当前没有可公开的 Benchmark 测量结果，不声明 QPS、TPS、P95/P99 或覆盖率数字。
 
 ## 9. 文档与路线图
 
